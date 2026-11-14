@@ -15,12 +15,14 @@ import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
 import extend, {
 	ToolRunGroup,
 	ToolRunSummary,
+	applyThoughtLabel,
 	describeRun,
 	groupSilentTurns,
 	groupToolRuns,
 	isGroupable,
 	isSilentTurn,
 	summarize,
+	thoughtLabel,
 } from "../extensions/tool-run-groups/index.ts";
 
 initTheme("dark", false);
@@ -550,6 +552,21 @@ check("Ctrl+O 的展开态传递到多轮摘要内的工具行", () => {
 	for (const child of summary.children) {
 		if (child instanceof ToolRunGroup) assert.equal(child.expanded, true);
 	}
+});
+
+check("思考结束后隐藏思考标签显示实际耗时", () => {
+	// 与摘要行同一套秒数换算。
+	assert.equal(thoughtLabel(1500).endsWith("Thought for 2s"), true, thoughtLabel(1500));
+	assert.equal(thoughtLabel(200).endsWith("Thought for 1s"), true, thoughtLabel(200));
+	assert.ok(thoughtLabel(1500).startsWith("\x1b[0m"), "需重置 pi 的斜体包裹");
+	assert.equal(describeRun(["bash", "bash"], 1500), "Thought for 2s, ran 2 shell commands");
+
+	const assistant = assistantRow({ thinking: "想一想" });
+	assert.ok(plain(assistant.render(WIDTH)).join("\n").includes("Thinking..."), "初始为占位标签");
+	applyThoughtLabel(assistant, 1500);
+	const lines = plain(assistant.render(WIDTH)).join("\n");
+	assert.ok(lines.includes("Thought for 2s"), lines);
+	assert.equal(lines.includes("Thinking..."), false, lines);
 });
 
 const failed = results.filter((r) => !r.ok);

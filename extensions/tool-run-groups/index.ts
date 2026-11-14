@@ -14,6 +14,7 @@
  * 收起：`Thought for 28s, ran 8 shell commands`；执行中 `Running 3 shell commands…`。
  * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
  * 不代表整段都失敗。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
+ * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
  *
  * Pi 没有消息级的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
  * 因此这里接管 `InteractiveMode` 的两个私有方法：`message_end` 之后，以及历史
@@ -62,6 +63,7 @@ interface ToolRow extends Component {
 interface AssistantInternals extends Component {
 	markdownSlots?: Array<{ kind: string }>;
 	lastMessage?: { stopReason?: string };
+	setHiddenThinkingLabel?(label: string): void;
 }
 
 /** 聚合所需的最小 `InteractiveMode` 内部结构。 */
@@ -107,15 +109,30 @@ export function isGroupable(toolNames: readonly string[]): boolean {
 	return toolNames.length >= MIN_RUN && toolNames.every((name) => !SOLO_TOOLS.has(name));
 }
 
+/** 毫秒折成整秒，至少 1s。 */
+function seconds(thoughtMs: number): number {
+	return Math.max(1, Math.round(thoughtMs / 1000));
+}
+
 /** 收起态的完整摘要：`Thought for 2s, ran 3 shell commands`。 */
 export function describeRun(toolNames: readonly string[], thoughtMs?: number): string {
-	const thought =
-		thoughtMs === undefined ? "" : `Thought for ${Math.max(1, Math.round(thoughtMs / 1000))}s, `;
+	const thought = thoughtMs === undefined ? "" : `Thought for ${seconds(thoughtMs)}s, `;
 	return `${thought}ran ${summarize(toolNames)}`;
 }
 
 function isToolRow(value: unknown): value is ToolRow {
 	return typeof ToolExecutionComponent === "function" && value instanceof ToolExecutionComponent;
+}
+
+/** 结束后的隐藏思考标签：正体 + 主题色，与流式中的 `Thinking...` 占位区分。 */
+export function thoughtLabel(thoughtMs: number, theme?: Theme): string {
+	const fg = theme ? theme.getFgAnsi("thinkingText") : "";
+	return `\x1b[0m${fg}Thought for ${seconds(thoughtMs)}s`;
+}
+
+/** 把一条已结束消息的隐藏思考标签换成实际耗时。 */
+export function applyThoughtLabel(assistant: Component, thoughtMs: number): void {
+	(assistant as AssistantInternals).setHiddenThinkingLabel?.(thoughtLabel(thoughtMs, activeTheme));
 }
 
 /** 每条助手消息的思考耗时，在 `message_end` 时记录，多轮摘要从这里累加。 */
@@ -566,6 +583,11 @@ function finishMessage(mode: GroupableMode, event: unknown): void {
 	const thoughtMs = clock?.sawThinking ? clock.lastThinkingAt - clock.startedAt : undefined;
 	clock = undefined;
 
+	// 思考已结束：隐藏思考的标签从 `Thinking...` 换成实际耗时，正在流式的下一条消息不受影响。
+	const assistant = lastAssistantChild(mode);
+	const hasThinking = (message.content ?? []).some((part) => part?.type === "thinking");
+	if (assistant && hasThinking && thoughtMs !== undefined) applyThoughtLabel(assistant, thoughtMs);
+
 	const ids = new Set<string>();
 	for (const part of message.content ?? []) {
 		if (part?.type === "toolCall" && typeof part.id === "string") ids.add(part.id);
@@ -573,7 +595,6 @@ function finishMessage(mode: GroupableMode, event: unknown): void {
 	// 失败或中断时保留逐条可见，便于判断是哪一次调用出的问题。
 	if (ids.size === 0 || message.stopReason === "error" || message.stopReason === "aborted") return;
 
-	const assistant = lastAssistantChild(mode);
 	if (assistant && thoughtMs !== undefined) thoughtByMessage.set(assistant, thoughtMs);
 
 	groupToolRuns(mode, { ids, thoughtMs });
