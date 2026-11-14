@@ -6,8 +6,8 @@ Pi coding agent 的增强与改造扩展集合。
 
 | 扩展 | 说明 | 状态 |
 |---|---|---|
-| `minimal-tools` | 工具调用两阶段显示（收起单行摘要 / 展开背景色块）；`edit` / `write` 默认展示改动内容；运行中显示实时耗时；思考块收起标签为 ` Thinking...` | 可用 |
-| `user-message-prefix` | `›` 标记：用户消息首行前缀、续行对齐；输入框首行同样以 `› ` 起头 | 可用 |
+| `minimal-tools` | 工具调用两阶段显示（收起单行摘要 / 展开背景色块）；`edit` / `write` 默认展示改动内容；运行中显示实时耗时；思考块收起标签为 `Thinking...` | 可用 |
+| `message-marks` | Claude Code 式 2 列标记栏：用户消息与输入框 `›`；助手文本块 `●`；工具调用 `●`（进行中灰、成功蓝、失败红）。续行、思考行与工具块统一对齐到第 2 列 | 可用 |
 
 ## 目录结构
 
@@ -23,18 +23,18 @@ pi-toolkit/
 
 Pi 从 `~/.pi/agent/extensions/` 自动发现 `<name>/index.ts`。
 
-以 `minimal-tools` 与 `user-message-prefix` 为例：
+以 `minimal-tools` 与 `message-marks` 为例：
 
 ```bash
 ln -s /d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
-ln -s /d/code/github/pi-toolkit/extensions/user-message-prefix ~/.pi/agent/extensions/user-message-prefix
+ln -s /d/code/github/pi-toolkit/extensions/message-marks ~/.pi/agent/extensions/message-marks
 ```
 
 在 WSL 下也可以用 Windows 路径：
 
 ```bash
 ln -s /mnt/d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
-ln -s /mnt/d/code/github/pi-toolkit/extensions/user-message-prefix ~/.pi/agent/extensions/user-message-prefix
+ln -s /mnt/d/code/github/pi-toolkit/extensions/message-marks ~/.pi/agent/extensions/message-marks
 ```
 
 安装后在 Pi 中执行 `/reload`，或重启会话。
@@ -53,7 +53,7 @@ pi -e /mnt/d/code/github/pi-toolkit/extensions/minimal-tools/index.ts
 
 ```bash
 node_modules/.bin/jiti test/render.test.ts
-node_modules/.bin/jiti test/user-message-prefix.test.ts
+node_modules/.bin/jiti test/message-marks.test.ts
 node_modules/.bin/jiti test/editor-prefix.test.ts
 ```
 

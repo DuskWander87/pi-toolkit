@@ -1,12 +1,12 @@
 /**
- * user-message-prefix 输入框部分（PromptPrefixEditor）渲染逻辑验证。
+ * message-marks 输入框部分（PromptPrefixEditor）渲染逻辑验证。
  *
  * 运行：node_modules/.bin/jiti test/editor-prefix.test.ts
  */
 import assert from "node:assert";
 import { getSelectListTheme, initTheme, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
-import { PromptPrefixEditor } from "../extensions/user-message-prefix/index.ts";
+import { PromptPrefixEditor } from "../extensions/message-marks/index.ts";
 
 initTheme("dark", false);
 

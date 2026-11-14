@@ -814,13 +814,13 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 // ============================================================================
 
 export default function (pi: ExtensionAPI) {
-	// 思考块标签前补一个空格，与工具块的缩进对齐。
+	// 标记栏的缩进由 message-marks 统一处理，标签本身不再留前导空格。
 	// pi 固定用 chalk.italic() 包裹该标签，而 chalk 会在 \x1b[23m 之后重开斜体；
 	// 因此用 \x1b[0m 重置样式，再补回主题色，得到正体标签。
 	// 主题色在会话启动时取值，切换主题后需 /reload 才会跟随。
 	pi.on("session_start", async (_event, ctx) => {
 		const thinkingFg = ctx.ui.theme.getFgAnsi("thinkingText");
-		ctx.ui.setHiddenThinkingLabel(`\x1b[0m${thinkingFg} Thinking...`);
+		ctx.ui.setHiddenThinkingLabel(`\x1b[0m${thinkingFg}Thinking...`);
 	});
 
 	// 表内工具用定制渲染；表外工具自动套用同一套两阶段折叠。

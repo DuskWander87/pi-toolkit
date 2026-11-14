@@ -353,7 +353,7 @@ check("args 缺失时不抛错（会话重建场景）", () => {
 check("session_start 设置正体的隐藏思考标签", () => {
 	const label = hiddenThinkingLabel!;
 	assert.ok(label.startsWith("\x1b[0m"), JSON.stringify(label));
-	assert.ok(label.endsWith(" Thinking..."), JSON.stringify(label));
+	assert.ok(label.endsWith("\x1b[38;2;153;153;153mThinking..."), JSON.stringify(label));
 	assert.ok(label.includes("\x1b[38;2;153;153;153m"), JSON.stringify(label));
 });
 
@@ -361,7 +361,7 @@ check("隐藏思考标签在 pi 的斜体包裹下不再显示为斜体", () => 
 	chalk.level = 3;
 	// 复现 assistant-message 的 theme.italic(theme.fg("thinkingText", label))。
 	const composed = chalk.italic(`\x1b[38;2;153;153;153m${hiddenThinkingLabel!}\x1b[39m`);
-	const labelStart = composed.indexOf(" Thinking...");
+	const labelStart = composed.indexOf("Thinking...");
 	assert.ok(labelStart >= 0, JSON.stringify(composed));
 	let italic = false;
 	for (const match of composed.slice(0, labelStart).matchAll(/\x1b\[([0-9;]*)m/g)) {
