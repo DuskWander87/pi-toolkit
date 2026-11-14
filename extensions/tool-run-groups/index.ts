@@ -151,6 +151,15 @@ export type ThoughtSource = (assistant: Component) => number | undefined;
 
 const thoughtFromMessage: ThoughtSource = (assistant) => thoughtByMessage.get(assistant);
 
+/** 摘要行已经统计过这些静默轮次的耗时，展开时不再重复各自的标签。 */
+function clearAbsorbedThoughtLabels(items: readonly Component[], thoughtFor: ThoughtSource): void {
+	for (const item of items) {
+		if (!(item instanceof AssistantMessageComponent)) continue;
+		const thoughtMs = thoughtFor(item);
+		if (thoughtMs !== undefined && thoughtMs > 0) clearThoughtLabel(item);
+	}
+}
+
 /**
  * 该助手消息是否是一个「静默轮次」：没有任何可见文本，只思考并调工具。
  *
@@ -546,7 +555,8 @@ export function groupSilentTurns(
 		// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要。
 		const preceding = flat[index - 1];
 		const extraThought = preceding instanceof AssistantMessageComponent ? preceding : undefined;
-		const thoughtMs = extraThought ? (options.thoughtMsFor ?? thoughtFromMessage)(extraThought) : undefined;
+		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
+		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
 		if (reused && sameItems(reused.children, items)) {
 			next.push(reused);
 		} else {
@@ -561,7 +571,8 @@ export function groupSilentTurns(
 				}),
 			);
 		}
-		// 耗时已在摘要行里，消息自己的 `Thought for Ns` 标签不再重复。
+		// 耗时已在摘要行里，展开后不再重复静默轮次与前置回复各自的标签。
+		clearAbsorbedThoughtLabels(items, thoughtFor);
 		if (extraThought && thoughtMs !== undefined && thoughtMs > 0) clearThoughtLabel(extraThought);
 		index = region.end - 1;
 	}

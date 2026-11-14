@@ -329,6 +329,25 @@ check("多轮摘要展开后是完整时间线", () => {
 	assert.ok(lines.length > 8, JSON.stringify(lines));
 });
 
+check("展开摘要不为已计入的静默轮次重复显示耗时标签", () => {
+	const silent = assistantRow({ thinking: "想一想" });
+	applyThoughtLabel(silent, 1500);
+	const mode = fakeMode([
+		silent,
+		finishedBash("c1", "ls"),
+		assistantRow({}),
+		finishedBash("c2", "pwd"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === silent ? 1500 : undefined) });
+
+	const summary = summariesOf(mode)[0]!;
+	summary.setExpanded(true);
+	const lines = plain(summary.render(WIDTH));
+	assert.equal(lines[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(lines.filter((line) => line.includes("Thought for 2s")).length, 1, JSON.stringify(lines));
+});
+
 check("请求开头带文本的回复留在摘要外，它引发的工具并入同一行", () => {
 	const text = assistantRow({ text: "我先看看目录" });
 	const mode = fakeMode([
