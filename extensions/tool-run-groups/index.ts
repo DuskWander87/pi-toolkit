@@ -4,12 +4,12 @@
  * 两级聚合，把工具调用收成摘要行（Claude Code 风格）。
  *
  * 第一级——单轮工具行 `ToolRunGroup`：同一轮助手回复里的连续工具行收成一行，
- * `edit` / `write` 不参与，单条调用保持原样。
+ * `edit` / `write` 不参与，单条调用留给请求级摘要行。
  *
- * 第二级——请求摘要 `ToolRunSummary`：两条带可见文本的回复之间（或用户消息与首条
- * 回复之间）的工具调用只留一行摘要，耗时按轮累加。带可见文本的回复本身不进折叠、
- * 照常显示；被中断或报错的轮次同样是硬边界。`edit` / `write` 行参与区间，但摘要行
- * 不统计它们，收起时仍逐条渲染——改动永远看得到。
+ * 第二级——请求摘要 `ToolRunSummary`：一个用户请求内的思考、工具调用与回复正文只留
+ * 一行摘要，耗时按轮累加。正文照常逐条渲染在摘要行下方，但不再各自附带一行
+ * `Thought for Ns`；被中断或报错的轮次是硬边界。`edit` / `write` 行参与区间，但
+ * 摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
  * 收起：`Thought for 28s, ran 8 shell commands`；执行中 `Running 3 shell commands…`。
  * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
@@ -42,7 +42,7 @@ const PATCHED = Symbol.for("pi-toolkit.tool-run-groups");
 const GUTTER = 2;
 /** 改动类工具必须逐条可见。 */
 const SOLO_TOOLS = new Set(["edit", "write"]);
-/** 单条调用保持原样：命令行比「ran 1 shell command」更有用。 */
+/** 第一级至少两个连续工具行才收紧；单条调用由第二级摘要行折叠。 */
 const MIN_RUN = 2;
 /** 内置工具名到展示名的映射，与 minimal-tools 保持一致。 */
 const TOOL_LABELS: Record<string, string> = { bash: "shell" };
@@ -151,12 +151,10 @@ export type ThoughtSource = (assistant: Component) => number | undefined;
 
 const thoughtFromMessage: ThoughtSource = (assistant) => thoughtByMessage.get(assistant);
 
-/** 摘要行已经统计过这些静默轮次的耗时，展开时不再重复各自的标签。 */
-function clearAbsorbedThoughtLabels(items: readonly Component[], thoughtFor: ThoughtSource): void {
+/** 摘要行已经统计过区间内轮次的耗时，收起与展开都不再显示各自的标签。 */
+function clearAbsorbedThoughtLabels(items: readonly Component[]): void {
 	for (const item of items) {
-		if (!(item instanceof AssistantMessageComponent)) continue;
-		const thoughtMs = thoughtFor(item);
-		if (thoughtMs !== undefined && thoughtMs > 0) clearThoughtLabel(item);
+		if (item instanceof AssistantMessageComponent) clearThoughtLabel(item);
 	}
 }
 
@@ -167,11 +165,19 @@ function clearAbsorbedThoughtLabels(items: readonly Component[], thoughtFor: Tho
  * `false` —— 退化到不合并，比错误地藏起内容安全。
  */
 export function isSilentTurn(value: unknown): boolean {
-	if (!(value instanceof AssistantMessageComponent)) return false;
+	if (!isFoldableAssistant(value)) return false;
 	const internals = value as AssistantInternals;
 	if (!Array.isArray(internals.markdownSlots)) return false;
-	if (internals.markdownSlots.some((slot) => slot.kind === "text")) return false;
-	const stopReason = internals.lastMessage?.stopReason;
+	return !internals.markdownSlots.some((slot) => slot.kind === "text");
+}
+
+/**
+ * 可以进入折叠区间的助手消息：思考轮次与带正文的回复都折叠，
+ * 只要不是中断、报错或截断的轮次。正文在收起态照常渲染，只是不再单独占一行耗时标签。
+ */
+function isFoldableAssistant(value: unknown): boolean {
+	if (!(value instanceof AssistantMessageComponent)) return false;
+	const stopReason = (value as AssistantInternals).lastMessage?.stopReason;
 	return stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length";
 }
 
@@ -333,7 +339,7 @@ export interface ToolRunSummaryOptions {
 /**
  * 一次请求里工具调用的摘要行 + 折叠内的时间线。
  *
- * 带可见文本的助手消息不进区间，照常显示在外面；区间内是静默助手消息与工具段。
+ * 带可见文本的助手消息进入区间，正文照常渲染在摘要行下方，不再各自附带耗时标签。
  * `edit` / `write` 行参与区间但不被摘要行代表：摘要收起时它们仍逐条渲染。
  * 摘要内容每次渲染时从子组件重新累计，因此执行中/失败/主题切换都会即时反映；
  * 工具名与耗时随折叠区间增长而变化，不需要重建组件。
@@ -377,19 +383,19 @@ export class ToolRunSummary extends Container {
 			this.soloLayout = [];
 			return ["", summary, ...super.render(width)];
 		}
-		// 改动类工具行不靠摘要行代表，收起时也逐条渲染。
-		const solo: string[] = [];
+		// 普通工具段由摘要行代表；正文与改动行不靠摘要行代表，收起时也逐条渲染。
+		const body: string[] = [];
 		const layout: Array<{ child: Component; start: number; height: number }> = [];
 		let top = 2; // 空行 + 摘要行
 		for (const child of this.children) {
-			if (!isSoloRow(child)) continue;
+			if (isToolSegment(child) && !isSoloRow(child)) continue;
 			const lines = child.render(width);
 			layout.push({ child, start: top, height: lines.length });
 			top += lines.length;
-			solo.push(...lines);
+			body.push(...lines);
 		}
 		this.soloLayout = layout;
-		return ["", summary, ...solo];
+		return ["", summary, ...body];
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
@@ -477,13 +483,23 @@ function isSoloRow(value: unknown): boolean {
 	return isToolRow(value) && SOLO_TOOLS.has(String(value.toolName));
 }
 
-/** 折叠区间里允许出现的项：任何工具段，以及没有可见文本的助手消息。 */
+/** 折叠区间里允许出现的项：任何工具段，以及没有中断报错的助手消息。 */
 function isAbsorbable(value: unknown): boolean {
+	return isToolSegment(value) || isFoldableAssistant(value);
+}
+
+/**
+ * 区间只能从工具段或静默轮次开头。
+ *
+ * 带正文的回复若开启区间，摘要行会跑到它上方；这种回复留在区间外，
+ * 既作为 `extraThought` 贡献耗时，也让正文先于摘要行出现。
+ */
+function isRegionStart(value: unknown): boolean {
 	return isToolSegment(value) || isSilentTurn(value);
 }
 
 /**
- * 区间内普通工具段的数量：不到两段时交给第一级，合并没有意义。
+ * 区间内普通工具段的数量：一段都没有时没有可摘要的内容。
  *
  * `edit` / `write` 不算在内：它们始终逐条渲染，不需要靠摘要行代表。
  */
@@ -501,11 +517,11 @@ function countedSegments(items: readonly Component[]): number {
  * 因此同一条回复与下一条回复之间只有一行摘要。
  */
 function readRegion(children: readonly Component[], index: number): Region | undefined {
-	if (!isAbsorbable(children[index])) return undefined;
+	if (!isRegionStart(children[index])) return undefined;
 	const items: Component[] = [];
 	let cursor = index;
 	while (cursor < children.length && isAbsorbable(children[cursor])) items.push(children[cursor++]!);
-	if (countedSegments(items) < 2) return undefined;
+	if (countedSegments(items) === 0) return undefined;
 	return { items, end: cursor };
 }
 
@@ -516,9 +532,9 @@ function sameItems(left: readonly Component[], right: readonly Component[]): boo
 /**
  * 把 `chatContainer` 里可折叠的工具调用区间合并成 `ToolRunSummary`。
  *
- * 区间由连续的普通工具段与静默助手消息组成，可以由工具段开头：请求开头那条带文本
- * 的回复留在区间外，它引发的调用仍并入同一行，所以一个请求只留一行摘要。带可见文本
- * 的回复、`edit` / `write` 行、报错或中断的轮次都是硬边界。
+ * 区间由连续的普通工具段与助手消息组成，可以由工具段开头：请求开头那条带正文
+ * 的回复留在区间外，它引发的调用仍并入同一行，所以一个请求只留一行摘要。
+ * `edit` / `write` 行与报错或中断的轮次是硬边界。
  *
  * 已有的摘要会先拆回子组件再重新扫描，因此幂等；区间未变化时复用原实例，
  * 保留用户的折叠状态。
@@ -544,7 +560,7 @@ export function groupSilentTurns(
 
 	const next: Component[] = [];
 	for (let index = 0; index < flat.length; index++) {
-		const region = readRegion(flat, index);
+	const region = readRegion(flat, index);
 		if (!region) {
 			next.push(flat[index]!);
 			continue;
@@ -571,9 +587,9 @@ export function groupSilentTurns(
 				}),
 			);
 		}
-		// 耗时已在摘要行里，展开后不再重复静默轮次与前置回复各自的标签。
-		clearAbsorbedThoughtLabels(items, thoughtFor);
-		if (extraThought && thoughtMs !== undefined && thoughtMs > 0) clearThoughtLabel(extraThought);
+		// 耗时已在摘要行里，收起与展开都不再重复区间内轮次与前置回复各自的标签。
+		clearAbsorbedThoughtLabels(items);
+		if (extraThought) clearThoughtLabel(extraThought);
 		index = region.end - 1;
 	}
 

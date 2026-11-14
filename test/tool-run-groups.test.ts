@@ -323,7 +323,8 @@ check("多轮摘要展开后是完整时间线", () => {
 	const lines = plain(summary.render(WIDTH));
 	assert.equal(lines[0], "");
 	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
-	assert.equal(lines.filter((line) => line.includes("Thinking...")).length, 2, JSON.stringify(lines));
+	// 耗时已在摘要行，展开的静默轮次不再重复显示占位标签。
+	assert.equal(lines.filter((line) => line.includes("Thinking...")).length, 0, JSON.stringify(lines));
 	// 折叠内仍有两组各自的摘要行。
 	assert.equal(lines.filter((line) => line.trimStart().startsWith("ran 2 shell commands")).length, 2);
 	assert.ok(lines.length > 8, JSON.stringify(lines));
@@ -385,18 +386,37 @@ check("带文本回复的耗时并入摘要后，不再单独显示耗时标签"
 	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"), false, "标签不应与摘要行重复");
 });
 
-check("没有摘要承载耗时时，消息自己的耗时标签保留", () => {
+check("只有一条工具调用时也合成一行摘要", () => {
 	const text = assistantRow({ thinking: "想一想", text: "我先看看目录" });
 	applyThoughtLabel(text, 2000);
 	const mode = fakeMode([text, finishedBash("c1", "ls")]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
 
-	assert.equal(summariesOf(mode).length, 0);
-	assert.ok(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"));
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"Thought for 2s, ran 1 shell command",
+	);
+	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"), false);
 });
 
-check("请求中间出现带文本的回复时两侧各自成行", () => {
+check("单条工具调用与思考合成一行摘要，消息标记不再单独占行", () => {
+	const think = assistantRow({ thinking: "看一眼图片" });
+	applyThoughtLabel(think, 1000);
+	const row = finish(toolRow("read", "r1", { path: "a.png" }));
+	const mode = fakeMode([think, row]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === think ? 1000 : undefined) });
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	const lines = plain(summaries[0]!.render(WIDTH));
+	assert.equal(lines.length, 2, JSON.stringify(lines));
+	assert.equal(lines[1]!.trimStart(), "Thought for 1s, ran 1 read call");
+});
+
+check("请求中间带文本的回复并入同一区间", () => {
 	const mode = fakeMode([
 		assistantRow({}),
 		finishedBash("c1", "ls"),
@@ -415,34 +435,43 @@ check("请求中间出现带文本的回复时两侧各自成行", () => {
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 
-	assert.equal(summariesOf(mode).length, 2);
-	assert.equal(mode.chatContainer.children.length, 3);
-	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(mode.chatContainer.children.length, 1);
+	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
+	assert.equal(lines[1]!.trimStart(), "ran 8 shell commands");
+	assert.ok(
+		lines.some((line) => line.includes("我发现了问题")),
+		JSON.stringify(lines),
+	);
 });
 
-check("只有一段工具调用时先交给第一级，后续轮次到位后合成一行", () => {
+check("同一请求的工具段随轮次增长合入同一行摘要", () => {
 	const text = assistantRow({ text: "我先看看目录" });
+	const elapsed = (item: unknown) => (item === text ? 1000 : undefined);
 	const mode = fakeMode([text, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
 	groupToolRuns(mode, { ids: new Set(["c1", "c2"]), thoughtMs: 1000 });
-	groupSilentTurns(mode);
-	assert.equal(summariesOf(mode).length, 0);
-	assert.equal(mode.chatContainer.children.length, 2);
+	groupSilentTurns(mode, { thoughtMsFor: elapsed });
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"Thought for 1s, ran 2 shell commands",
+	);
 
 	mode.chatContainer.addChild(assistantRow({}));
 	mode.chatContainer.addChild(finishedBash("c3", "id"));
 	mode.chatContainer.addChild(finishedBash("c4", "date"));
-	groupSilentTurns(mode);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: elapsed });
 
 	assert.equal(summariesOf(mode).length, 1);
-	assert.equal(mode.chatContainer.children.length, 2);
 	assert.equal(mode.chatContainer.children[0], text);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"ran 4 shell commands",
+		"Thought for 1s, ran 4 shell commands",
 	);
 });
 
-check("有可见文本的轮次作为边界，不跨轮合并", () => {
+check("带正文的轮次并入同一区间，正文在收起态可见", () => {
 	const mode = fakeMode([
 		assistantRow({ thinking: "a" }),
 		finishedBash("c1", "ls"),
@@ -454,8 +483,35 @@ check("有可见文本的轮次作为边界，不跨轮合并", () => {
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 
-	assert.equal(summariesOf(mode).length, 0);
-	assert.equal(mode.chatContainer.children.length, 4);
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(mode.chatContainer.children.length, 1);
+	const lines = plain(summaries[0]!.render(WIDTH));
+	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.ok(
+		lines.some((line) => line.includes("我发现了问题")),
+		JSON.stringify(lines),
+	);
+});
+
+check("请求内带正文的回复不再单独显示耗时标签", () => {
+	const text = assistantRow({ thinking: "想一想", text: "我发现了问题" });
+	applyThoughtLabel(text, 2000);
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		text,
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
+
+	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
+	assert.equal(lines[1]!.trimStart(), "Thought for 2s, ran 4 shell commands");
+	assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
+	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for"), false);
 });
 
 check("用户消息作为边界，两侧各自折叠", () => {
@@ -482,18 +538,26 @@ check("用户消息作为边界，两侧各自折叠", () => {
 	assert.equal(mode.chatContainer.children.length, 3);
 });
 
-check("报错与中断的轮次不参与折叠", () => {
+check("报错与中断的轮次留在摘要外，工具段仍各自折叠", () => {
+	const failed = assistantRow({ stopReason: "error" });
+	const aborted = assistantRow({ stopReason: "aborted" });
 	const mode = fakeMode([
-		assistantRow({ stopReason: "error" }),
+		failed,
 		finishedBash("c1", "ls"),
 		finishedBash("c2", "pwd"),
-		assistantRow({ stopReason: "aborted" }),
+		aborted,
 		finishedBash("c3", "id"),
 		finishedBash("c4", "date"),
 	]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
-	assert.equal(summariesOf(mode).length, 0);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 2);
+	assert.ok(summaries.every((summary) => !summary.children.includes(failed)));
+	assert.ok(summaries.every((summary) => !summary.children.includes(aborted)));
+	assert.equal(mode.chatContainer.children.includes(failed), true);
+	assert.equal(mode.chatContainer.children.includes(aborted), true);
 });
 
 check("单条工具行组成的静默轮次同样折叠", () => {
@@ -511,7 +575,7 @@ check("单条工具行组成的静默轮次同样折叠", () => {
 	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
 });
 
-check("只有一段普通调用时 edit 不触发摘要", () => {
+check("edit 不计入摘要行的工具段，仍逐条渲染", () => {
 	const edit = toolRow("edit", "e1", { path: "a.ts" });
 	const mode = fakeMode([
 		assistantRow({}),
@@ -523,8 +587,10 @@ check("只有一段普通调用时 edit 不触发摘要", () => {
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 
-	assert.equal(summariesOf(mode).length, 0);
-	assert.equal(mode.chatContainer.children.includes(edit), true);
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(summaries[0]!.children.includes(edit), true);
 });
 
 check("edit / write 参与区间但不被摘要行代表，收起时逐条渲染", () => {
@@ -676,6 +742,39 @@ check("展开态重建后新纳入的工具组也展开", () => {
 	const collapsed = group(["z1", "z2"], false);
 	new ToolRunSummary({ items: [collapsed], expanded: false, theme: () => undefined, requestRender() {} });
 	assert.equal(collapsed.expanded, false);
+});
+
+check("请求级摘要吸收带正文的后续回复，只留一行耗时", () => {
+	const first = assistantRow({ thinking: "先确认", text: "主人，先确认源目录和技能目录的现状。" });
+	const silent = assistantRow({ thinking: "查一下" });
+	const second = assistantRow({ thinking: "再看", text: "主人，创建符号链接需要管理员权限。" });
+	applyThoughtLabel(first, 2000);
+	applyThoughtLabel(silent, 900);
+	applyThoughtLabel(second, 900);
+	const mode = fakeMode([
+		first,
+		finishedBash("c1", "ls"),
+		silent,
+		finishedBash("c2", "mklink"),
+		second,
+	]);
+	groupToolRuns(mode);
+	const elapsed = new Map<unknown, number>([
+		[first, 2000],
+		[silent, 900],
+		[second, 900],
+	]);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => elapsed.get(item) });
+
+	assert.equal(mode.chatContainer.children.length, 2);
+	assert.equal(mode.chatContainer.children[0], first);
+	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
+	assert.equal(lines[1]!.trimStart(), "Thought for 4s, ran 2 shell commands");
+	assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
+	assert.ok(
+		lines.some((line) => line.includes("主人，创建符号链接需要管理员权限。")),
+		JSON.stringify(lines),
+	);
 });
 
 const failed = results.filter((r) => !r.ok);
