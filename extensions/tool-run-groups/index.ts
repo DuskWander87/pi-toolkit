@@ -13,7 +13,7 @@
  *
  * 收起：`Thought for 28s, ran 8 shell commands`；执行中 `Running 3 shell commands…`。
  * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
- * 不代表整段都失敗。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
+ * 不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
  * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
  *
  * Pi 没有消息级的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -327,6 +327,8 @@ export class ToolRunSummary extends Container {
 	private readonly thoughtMsFor: ThoughtSource;
 	private readonly extraThought: Component | undefined;
 	private expandedState: boolean;
+	/** 收起态下改动行的位置，点击要落到行上而不是整块折起摘要。 */
+	private soloLayout: Array<{ child: Component; start: number; height: number }> = [];
 
 	constructor(options: ToolRunSummaryOptions) {
 		super();
@@ -336,6 +338,8 @@ export class ToolRunSummary extends Container {
 		this.extraThought = options.extraThought;
 		this.expandedState = options.expanded;
 		for (const item of options.items) this.addChild(item);
+		// 复活已展开的摘要时，新纳入的轮次也要铺开，否则展开的时间线里夹着一行收起。
+		if (this.expandedState) this.setExpanded(true);
 	}
 
 	get expanded(): boolean {
@@ -352,21 +356,41 @@ export class ToolRunSummary extends Container {
 
 	render(width: number): string[] {
 		const summary = this.summaryLine(width);
-		if (this.expandedState) return ["", summary, ...super.render(width)];
+		if (this.expandedState) {
+			this.soloLayout = [];
+			return ["", summary, ...super.render(width)];
+		}
 		// 改动类工具行不靠摘要行代表，收起时也逐条渲染。
 		const solo: string[] = [];
+		const layout: Array<{ child: Component; start: number; height: number }> = [];
+		let top = 2; // 空行 + 摘要行
 		for (const child of this.children) {
-			if (isSoloRow(child)) solo.push(...child.render(width));
+			if (!isSoloRow(child)) continue;
+			const lines = child.render(width);
+			layout.push({ child, start: top, height: lines.length });
+			top += lines.length;
+			solo.push(...lines);
 		}
+		this.soloLayout = layout;
 		return ["", summary, ...solo];
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		if (
-			event.type === "click" &&
-			event.button === "left" &&
-			(!this.expandedState || event.y === 1)
-		) {
+		if (event.type === "click" && event.button === "left") {
+			if (this.expandedState) {
+				// 展开时只有摘要行负责折叠，其余行交给子组件。
+				if (event.y !== 1) {
+					return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
+				}
+			} else {
+				// 收起时改动行逐条可见，点击先落到行上（比如展开 diff）。
+				for (const { child, start, height } of this.soloLayout) {
+					if (event.y < start || event.y >= start + height) continue;
+					const result = child.handleMouse?.({ ...event, y: event.y - start, height });
+					if (result) return result;
+					break;
+				}
+			}
 			this.setExpanded(!this.expandedState);
 			this.requestRender();
 			return { handled: true };

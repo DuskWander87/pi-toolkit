@@ -8,7 +8,7 @@ Pi coding agent 的增强与改造扩展集合。
 |---|---|---|
 | `minimal-tools` | 工具调用两阶段显示（收起单行摘要 / 展开背景色块）；`edit` / `write` 默认展示改动内容；运行中显示实时耗时；思考块收起标签为 `Thinking...` | 可用 |
 | `message-marks` | Claude Code 式 2 列标记栏：用户消息与输入框 `›`；助手文本块 `●`；工具调用 `●`（进行中灰、成功蓝、失败红）。续行、思考行与工具块统一对齐到第 2 列 | 可用 |
-| `tool-run-groups` | 两级聚合：同一轮的工具行收成一行；两条带文本的回复之间（或用户消息与首条回复之间）的工具调用只留一行摘要（`Thought for 28s, ran 8 shell commands`）；思考结束后隐藏思考的标签从 `Thinking...` 换成 `Thought for Ns`；带文本的回复照常显示、不进折叠，中斷/报错的轮次是边界；`edit` / `write` 不计入摘要行，收起时也逐条渲染；Ctrl+O 或点击摘要行展开为完整时间线 | 可用 |
+| `tool-run-groups` | 两级聚合：同一轮的工具行收成一行；两条带文本的回复之间（或用户消息与首条回复之间）的工具调用只留一行摘要（`Thought for 28s, ran 8 shell commands`）；思考结束后隐藏思考的标签从 `Thinking...` 换成 `Thought for Ns`；带文本的回复照常显示、不进折叠，中断/报错的轮次是边界；`edit` / `write` 不计入摘要行，收起时也逐条渲染；Ctrl+O 或点击摘要行展开为完整时间线 | 可用 |
 
 ## 目录结构
 
@@ -68,6 +68,12 @@ node_modules/.bin/jiti test/tool-run-groups.test.ts
 ```powershell
 cmd /c mklink /J D:\code\github\pi-toolkit\node_modules C:\Users\<user>\.pi\agent\install\releases\<version>\node_modules
 ```
+
+## 已知限制
+
+- **思考正文的可见性由 Pi 的设置决定**。`settings.json` 的 `hideThinkingBlock` 为 `true` 时，终端只剩一枚标签行（流式中 `Thinking...`，结束后 `Thought for Ns`）；Pi 的默认值是 `false`，即显示思考正文。扩展不覆盖这个设置。
+- **思考可见性开关只作用于未折叠的助手消息**。Pi 的 `updateThinkingBlockVisibility` / `setHiddenThinkingLabel` 遍历 `chatContainer` 顶层，已被 `tool-run-groups` 折叠进摘要的轮次收不到这两次更新，切换后需重建会话才同步。
+- **历史回放没有逐轮思考耗时**。耗时在 `message_end` 时采集，回放出来的摘要行与标签不带 `Thought for Ns`。
 
 ## 参考
 

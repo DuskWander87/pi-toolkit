@@ -569,6 +569,68 @@ check("思考结束后隐藏思考标签显示实际耗时", () => {
 	assert.equal(lines.includes("Thinking..."), false, lines);
 });
 
+check("收起态点击改动行交给行自己处理", () => {
+	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	let forwarded: number | undefined;
+	(edit as any).handleMouse = (event: any) => {
+		forwarded = event.y;
+		return { handled: true };
+	};
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		edit,
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+
+	// 行内坐标：空行(0) + 摘要行(1) 之后是改动行。
+	const lines = plain(summary.render(WIDTH));
+	const editY = lines.findIndex((line) => line.includes("a.ts"));
+	assert.ok(editY > 1, JSON.stringify(lines));
+	summary.handleMouse({ type: "click", button: "left", x: 3, y: editY, height: 1 } as any);
+	assert.equal(forwarded, editY - 2, "应转发到改动行自身坐标");
+	assert.equal(summary.expanded, false, "摘要不应跟着折起");
+
+	// 摘要行与空行照旧折起整块。
+	summary.handleMouse({ type: "click", button: "left", x: 3, y: 1, height: 1 } as any);
+	assert.equal(summary.expanded, true);
+});
+
+check("展开态重建后新纳入的工具组也展开", () => {
+	const group = (ids: [string, string], expanded: boolean) =>
+		new ToolRunGroup({
+			rows: [finishedBash(ids[0], ids[0]), finishedBash(ids[1], ids[1])],
+			toolNames: ["bash", "bash"],
+			expanded,
+			theme: () => undefined,
+			requestRender() {},
+		});
+
+	const next = group(["y1", "y2"], false);
+	const summary = new ToolRunSummary({
+		items: [group(["x1", "x2"], true), next],
+		expanded: true,
+		theme: () => undefined,
+		requestRender() {},
+	});
+	assert.equal(next.expanded, true, "新纳入的组应继承展开态");
+	const lines = plain(summary.render(WIDTH));
+	for (const id of ["x1", "y1"]) {
+		assert.equal(lines.filter((line) => line.includes(`command: ${id}`)).length, 1, JSON.stringify(lines));
+	}
+
+	// 收起态的摘要不传播展开。
+	const collapsed = group(["z1", "z2"], false);
+	new ToolRunSummary({ items: [collapsed], expanded: false, theme: () => undefined, requestRender() {} });
+	assert.equal(collapsed.expanded, false);
+});
+
 const failed = results.filter((r) => !r.ok);
 for (const r of results) {
 	console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
