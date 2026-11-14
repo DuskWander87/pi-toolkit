@@ -4,6 +4,8 @@
 
 ## 效果
 
+![用户消息、思考、助手与工具行的标记栏](../../assets/message-marks.png)
+
 ```text
 › 先看一下测试脚本
   续行与首行内容对齐
@@ -66,17 +68,7 @@
 
 ## 安装
 
-```bash
-ln -s /d/code/github/pi-toolkit/extensions/message-marks ~/.pi/agent/extensions/message-marks
-```
-
-WSL 下把路径换成 `/mnt/d/code/github/pi-toolkit/extensions/message-marks`。安装后在 Pi 中执行 `/reload`，或重启会话。卸载时删除该软链即可。
-
-临时试用可以不建软链：
-
-```bash
-pi -e <仓库路径>/extensions/message-marks/index.ts
-```
+安装、更新与卸载见[根 README](../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -112,12 +104,7 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 
 ## 测试
 
-```bash
-node_modules/.bin/jiti test/message-marks.test.ts
-node_modules/.bin/jiti test/editor-prefix.test.ts
-```
-
-前者覆盖用户消息前缀、助手与工具圆点、颜色、行宽与重复安装；后者覆盖输入框前缀、宽度、光标与工作状态。
+`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../README.md#测试)。
 
 ---
 

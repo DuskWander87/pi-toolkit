@@ -4,6 +4,15 @@
 
 ## 效果
 
+![三次工具调用收起后只剩一行摘要](../../assets/tool-run-groups.png)
+
+<details>
+<summary>展开后的时间线</summary>
+
+![Ctrl+O 展开后逐条显示工具调用](../../assets/tool-run-groups-expanded.png)
+
+</details>
+
 ```text
 收起
   Thought for 12s, ran 3 shell commands
@@ -78,17 +87,7 @@
 
 ## 安装
 
-```bash
-ln -s /d/code/github/pi-toolkit/extensions/tool-run-groups ~/.pi/agent/extensions/tool-run-groups
-```
-
-WSL 下把路径换成 `/mnt/d/code/github/pi-toolkit/extensions/tool-run-groups`。安装后在 Pi 中执行 `/reload`，或重启会话。卸载时删除该软链即可。
-
-临时试用可以不建软链：
-
-```bash
-pi -e <仓库路径>/extensions/tool-run-groups/index.ts
-```
+安装、更新与卸载见[根 README](../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -121,11 +120,7 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 
 ## 测试
 
-```bash
-node_modules/.bin/jiti test/tool-run-groups.test.ts
-```
-
-覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、执行中不折叠、展开状态传递、点击行为与实例复用。
+`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、执行中不折叠、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../README.md#测试)。
 
 ---
 

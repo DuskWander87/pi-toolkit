@@ -4,6 +4,8 @@
 
 ## 效果
 
+![工具行的执行中与收起态](../../assets/minimal-tools.png)
+
 ```text
 执行中
   shell · running (1.2s)
@@ -79,17 +81,7 @@
 
 ## 安装
 
-```bash
-ln -s /d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
-```
-
-WSL 下把路径换成 `/mnt/d/code/github/pi-toolkit/extensions/minimal-tools`。安装后在 Pi 中执行 `/reload`，或重启会话。卸载时删除该软链即可。
-
-临时试用可以不建软链：
-
-```bash
-pi -e <仓库路径>/extensions/minimal-tools/index.ts
-```
+安装、更新与卸载见[根 README](../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -120,11 +112,7 @@ pi -e <仓库路径>/extensions/minimal-tools/index.ts
 
 ## 测试
 
-```bash
-node_modules/.bin/jiti test/render.test.ts
-```
-
-覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 截断、表外工具、图片回退、缺失参数与隐藏思考标签。
+`test/render.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 截断、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../README.md#测试)。
 
 ---
 

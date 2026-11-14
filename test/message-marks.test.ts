@@ -1,7 +1,7 @@
 /**
  * message-marks 渲染逻辑验证。
  *
- * 运行：node_modules/.bin/jiti test/message-marks.test.ts
+ * 运行：npm test
  */
 import assert from "node:assert";
 import {

@@ -1,7 +1,7 @@
 /**
  * minimal-tools 渲染逻辑验证：直接调用扩展注册的 renderCall / renderResult，断言渲染出的字符串。
  *
- * 运行：npx tsx test/render.test.ts
+ * 运行：npm test
  */
 import assert from "node:assert";
 import chalk from "chalk";

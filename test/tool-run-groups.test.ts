@@ -1,7 +1,7 @@
 /**
  * tool-run-groups 渲染与聚合逻辑验证。
  *
- * 运行：node_modules/.bin/jiti test/tool-run-groups.test.ts
+ * 运行：npm test
  */
 import assert from "node:assert";
 import {

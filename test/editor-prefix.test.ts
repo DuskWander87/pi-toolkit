@@ -1,7 +1,7 @@
 /**
  * message-marks 输入框部分（PromptPrefixEditor）渲染逻辑验证。
  *
- * 运行：node_modules/.bin/jiti test/editor-prefix.test.ts
+ * 运行：npm test
  */
 import assert from "node:assert";
 import { getSelectListTheme, initTheme, type KeybindingsManager } from "@earendil-works/pi-coding-agent";

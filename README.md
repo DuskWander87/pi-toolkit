@@ -1,22 +1,25 @@
 # pi-toolkit
 
-Pi coding agent 的终端界面扩展集合。它不改模型、工具与会话数据，只重写对话记录的呈现：把一次请求里的工具调用收成一行摘要，把用户、助手与工具放进统一的 2 列标记栏，并让 `edit` / `write` 的改动默认可见。
+Pi coding agent 的终端界面扩展集合。它只重写对话的渲染：把一次请求里的工具调用收成一行摘要，把用户、助手与工具放进统一的 2 列标记栏，并让 `edit` / `write` 的改动默认可见。模型、工具与会话数据都不改。
 
 目标是用更少的行数读完一轮对话，需要细节时再展开。
 
+三个扩展都替换 Pi 的渲染层，其中 `tool-run-groups` 接管 `InteractiveMode` 的私有方法，已在 Pi 1.5.2 验证。Pi 升级后可能退化或失效，见[兼容性](#兼容性)。
+
+中文 | [English](README.en.md)
+
 ## 效果
 
-```text
-› 跑测试并修掉失败的用例
-● 先定位失败的用例。
-  Thought for 12s, ran 3 shell commands
-● edit test/render.test.ts
-  └ Added 2 lines, removed 1 line
-  ... (4 more lines, ctrl+o to expand)
-● 已修正，再跑一遍确认。
-```
+![一次请求收起后只剩一行摘要](assets/hero-collapsed.png)
 
 上面这一屏同时用到三个扩展：`message-marks` 提供标记栏，`tool-run-groups` 提供摘要行，`minimal-tools` 提供工具行与 diff 内容。
+
+<details>
+<summary>展开后的时间线</summary>
+
+![Ctrl+O 展开后逐条显示工具调用](assets/hero-expanded.png)
+
+</details>
 
 ## 扩展
 
@@ -28,73 +31,46 @@ Pi coding agent 的终端界面扩展集合。它不改模型、工具与会话�
 
 三个扩展彼此独立，可以只装其中一个。具体行为、快捷键、实现方式与限制见各目录下的 README。
 
-## 安装
+## 快速开始
 
-Pi 从 `~/.pi/agent/extensions/<name>/index.ts` 自动发现扩展。以本仓库放在 `/d/code/github/pi-toolkit` 为例：
-
-```bash
-ln -s /d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
-ln -s /d/code/github/pi-toolkit/extensions/message-marks ~/.pi/agent/extensions/message-marks
-ln -s /d/code/github/pi-toolkit/extensions/tool-run-groups ~/.pi/agent/extensions/tool-run-groups
-```
-
-WSL 下把路径换成 `/mnt/d/code/github/pi-toolkit/...`。
-
-安装后在 Pi 中执行 `/reload`，或重启会话。卸载时删除对应的软链：
+### 安装
 
 ```bash
-rm ~/.pi/agent/extensions/<name>
+pi install git:github.com/DuskWander87/pi-toolkit
 ```
 
-临时试用单个扩展，不必先建软链：
+一条命令装好三个扩展，`pi list` 确认，然后在 Pi 中执行 `/reload` 或重启会话。
+
+已经 clone 到本地时，装本地副本：
 
 ```bash
-pi -e <仓库路径>/extensions/<name>/index.ts
+git clone https://github.com/DuskWander87/pi-toolkit
+pi install ./pi-toolkit
 ```
 
-## 目录结构
+第二条命令在 clone 的上级目录执行，路径也可以写成绝对路径。
 
-```text
-pi-toolkit/
-├── extensions/
-│   ├── minimal-tools/
-│   │   ├── README.md
-│   │   └── index.ts
-│   ├── message-marks/
-│   │   ├── README.md
-│   │   └── index.ts
-│   └── tool-run-groups/
-│       ├── README.md
-│       └── index.ts
-├── test/
-├── package.json
-└── README.md
-```
-
-扩展是纯 TypeScript，没有构建步骤，Pi 直接加载 `index.ts`。
-
-## 测试
-
-渲染逻辑的回归用例直接调用扩展注册的渲染函数并断言输出：
+### 只保留部分扩展
 
 ```bash
-node_modules/.bin/jiti test/render.test.ts
-node_modules/.bin/jiti test/message-marks.test.ts
-node_modules/.bin/jiti test/editor-prefix.test.ts
-node_modules/.bin/jiti test/tool-run-groups.test.ts
+pi config
 ```
 
-| 测试 | 覆盖 |
-|---|---|
-| `test/render.test.ts` | `minimal-tools`：工具行、摘要、展开、diff、表外工具、思考标签 |
-| `test/message-marks.test.ts` | `message-marks`：用户消息、助手与工具圆点、颜色、行宽 |
-| `test/editor-prefix.test.ts` | `message-marks`：输入框前缀、宽度与光标 |
-| `test/tool-run-groups.test.ts` | `tool-run-groups`：聚合、边界、摘要文案、展开与点击 |
+在列表里关掉不需要的扩展，下次启动生效。
 
-`jiti` 由 Pi 安装目录自带，无需额外依赖。测试从 `@earendil-works/*` 解析依赖，本机可通过目录联接把 `node_modules` 指向 Pi 的安装目录：
+### 试用后不留配置
 
-```powershell
-cmd /c mklink /J D:\code\github\pi-toolkit\node_modules C:\Users\<user>\.pi\agent\install\releases\<version>\node_modules
+```bash
+pi -e ./pi-toolkit
+```
+
+`-e` 只对这一次启动生效，Pi 会把它缓存在 `~/.pi/agent/tmp/extensions/` 下。同样在 clone 的上级目录执行。
+
+### 更新与卸载
+
+```bash
+pi update --extensions
+pi remove git:github.com/DuskWander87/pi-toolkit
 ```
 
 ## 兼容性
@@ -103,3 +79,28 @@ cmd /c mklink /J D:\code\github\pi-toolkit\node_modules C:\Users\<user>\.pi\agen
 - 三个扩展都依赖 Pi 的内部结构：`minimal-tools` 使用工具渲染 API，`message-marks` 包装导出的组件原型，`tool-run-groups` 接管 `InteractiveMode` 的私有方法。Pi 升级后可能退化或失效
 - 思考正文默认显示；只有把 `hideThinkingBlock` 设为 `true` 时才会换成隐藏标签。扩展不修改该设置
 - `tool-run-groups` 的点击展开依赖终端支持鼠标事件；`Ctrl+O` 始终可用
+
+## 测试
+
+```bash
+npm test
+```
+
+测试依赖 `jiti`、`chalk` 与两个 host 包。新 clone 且没有 `node_modules` 时，先装一份不写入 `package.json` 的依赖：
+
+```bash
+npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk
+```
+
+本机已经把 `node_modules` 指向 Pi 安装目录时，跳过这一步。
+
+| 测试 | 覆盖 |
+|---|---|
+| `test/render.test.ts` | `minimal-tools`：工具行、摘要、展开、diff、表外工具、思考标签 |
+| `test/message-marks.test.ts` | `message-marks`：用户消息、助手与工具圆点、颜色、行宽 |
+| `test/editor-prefix.test.ts` | `message-marks`：输入框前缀、宽度与光标 |
+| `test/tool-run-groups.test.ts` | `tool-run-groups`：聚合、边界、摘要文案、展开与点击 |
+
+## 许可
+
+[MIT](LICENSE)
