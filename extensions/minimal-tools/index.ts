@@ -26,6 +26,14 @@ const MAX_COMMAND_CHARS = 100;
 const EDIT_DIFF_MAX_LINES = 30;
 /** 默认展示的写入内容预览行数。 */
 const WRITE_PREVIEW_MAX_LINES = 10;
+/** 运行中计时的重绘间隔，与 Pi 内置工具计时一致。 */
+const TIMER_REFRESH_MS = 1000;
+
+/** 保存在 `context.state` 中的计时状态，renderCall 与 renderResult 共享。 */
+interface ToolTimerState {
+	startedAt?: number;
+	interval?: ReturnType<typeof setInterval>;
+}
 
 /** diff 行与变化片段的底色，随主题明暗切换。 */
 interface DiffPalette {
@@ -378,9 +386,40 @@ function summaryLine(
 	return new Text(`${prefix}${body}${tail}`, context.outputPad, 0);
 }
 
-/** 运行中占位，前缀与思考块标签对齐。 */
-function runningLine(theme: RenderTheme, label: string, pad: number): Text {
-	return new Text(theme.fg("muted", ` ${label} · running`), pad, 0);
+/** 运行中占位，前缀与思考块标签对齐；有起点时附带已用时间。 */
+function runningLine(theme: RenderTheme, label: string, pad: number, elapsed: string): Text {
+	const suffix = elapsed ? ` (${elapsed})` : "";
+	return new Text(theme.fg("muted", ` ${label} · running${suffix}`), pad, 0);
+}
+
+/** 执行开始时记下计时起点，只记录一次。 */
+function startTimer(context: RenderContext): void {
+	const state = context.state as ToolTimerState | undefined;
+	if (!state) return;
+	if (context.executionStarted && state.startedAt === undefined) {
+		state.startedAt = Date.now();
+	}
+}
+
+/**
+ * 同步计时状态并返回运行中已用时间。
+ * 运行中按秒触发重绘，结束时停止计时，避免后台残留 interval。
+ */
+function syncTimer(context: RenderContext, isPartial: boolean): string {
+	const state = context.state as ToolTimerState | undefined;
+	if (!state) return "";
+	if (!isPartial) {
+		if (state.interval !== undefined) {
+			clearInterval(state.interval);
+			state.interval = undefined;
+		}
+		return "";
+	}
+	startTimer(context);
+	if (state.startedAt !== undefined && state.interval === undefined) {
+		state.interval = setInterval(() => context.invalidate(), TIMER_REFRESH_MS);
+	}
+	return state.startedAt === undefined ? "" : formatDuration(Date.now() - state.startedAt);
 }
 
 /**
@@ -413,8 +452,10 @@ function expandedBlock(
 
 /**
  * 调用行：仅在执行中与出错时显示，成功结束且收起时由摘要行代替。
+ * 每次渲染调用行都会经过这里，因此顺带记录计时起点。
  */
-function shouldShowCall(context: RenderContext): boolean {
+function prepareCall(context: RenderContext): boolean {
+	startTimer(context);
 	if (context.isPartial || !context.executionStarted) return true;
 	return context.isError;
 }
@@ -437,8 +478,9 @@ function renderResultText(
 	const output = firstText(result);
 
 	if (options.isPartial) {
-		return runningLine(theme, runningLabel, context.outputPad);
+		return runningLine(theme, runningLabel, context.outputPad, syncTimer(context, true));
 	}
+	syncTimer(context, false);
 	if (context.isError) {
 		// 出错时 renderCall 已保留命令行，这里不再重复。
 		return expandedBlock(undefined, output, theme, true, context.outputPad);
@@ -460,8 +502,9 @@ function renderEditResult(
 	context: RenderContext,
 ): Text | Box {
 	if (options.isPartial) {
-		return runningLine(theme, "edit", context.outputPad);
+		return runningLine(theme, "edit", context.outputPad, syncTimer(context, true));
 	}
+	syncTimer(context, false);
 	if (context.isError) {
 		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
 	}
@@ -502,8 +545,9 @@ function renderWriteResult(
 	context: RenderContext,
 ): Text | Box {
 	if (options.isPartial) {
-		return runningLine(theme, "write", context.outputPad);
+		return runningLine(theme, "write", context.outputPad, syncTimer(context, true));
 	}
+	syncTimer(context, false);
 	if (context.isError) {
 		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
 	}
@@ -556,7 +600,7 @@ function genericRenderers(toolName: string, base: ToolRenderers | undefined): To
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const title = theme.fg("toolTitle", theme.bold(toolName));
@@ -593,7 +637,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			const command = typeof args?.command === "string" ? args.command : "";
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const line = oneLine(command) || "...";
@@ -619,7 +663,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	read: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
@@ -648,7 +692,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	write: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
@@ -667,7 +711,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	edit: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
@@ -686,7 +730,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	grep: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const pattern = typeof args?.pattern === "string" ? args.pattern : "";
@@ -713,7 +757,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	find: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const pattern = typeof args?.pattern === "string" ? args.pattern : "";
@@ -740,7 +784,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	ls: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!shouldShowCall(context)) {
+			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
 			const path = shortenPath(typeof args?.path === "string" ? args.path : ".");

@@ -107,11 +107,39 @@ console.log("== 行首缩进（outputPad=1） ==");
 }
 
 // ---------------------------------------------------------------- 1. 运行中占位
-check("bash 执行中：显示命令行 + running 占位", () => {
+check("bash 执行中：显示命令行 + running 占位与已用时间", () => {
 	const r = renderers("bash");
-	const running = ctx({ isPartial: true, durationMs: undefined });
+	const running = ctx({ isPartial: true, durationMs: undefined, state: { startedAt: Date.now() - 1500 } });
 	assert.equal(dedent(text(r.renderCall({ command: "sleep 5" }, theme, running))), "$ sleep 5");
-	assert.equal(dedent(text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running))), "shell · running");
+	const line = dedent(text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)));
+	assert.match(line, /^shell · running \(1\.[5-6]s\)$/, line);
+});
+
+check("运行中计时按秒重绘，结束后停止", () => {
+	const r = renderers("bash");
+	let redraws = 0;
+	const running = ctx({
+		isPartial: true,
+		durationMs: undefined,
+		state: { startedAt: Date.now() },
+		invalidate: () => redraws++,
+	});
+	r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running);
+	const interval = (running.state as { interval?: ReturnType<typeof setInterval> }).interval;
+	assert.ok(interval !== undefined, "运行中未启动重绘计时器");
+
+	const done = ctx({ durationMs: 163, state: running.state });
+	r.renderResult({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: false }, theme, done);
+	assert.equal((done.state as { interval?: unknown }).interval, undefined, "结束后计时器未停止");
+	clearInterval(interval);
+	void redraws;
+});
+
+check("无计时起点时降级为无耗时占位", () => {
+	const r = renderers("bash");
+	const running = ctx({ isPartial: true, executionStarted: false, durationMs: undefined, state: {} });
+	const line = dedent(text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)));
+	assert.equal(line, "shell · running");
 });
 
 // ---------------------------------------------------------------- 2. 超长命令截断
@@ -204,9 +232,12 @@ check("尾部上限/截断提示行不计入条目数", () => {
 // ---------------------------------------------------------------- 9. 表外工具
 check("表外工具（powershell）套用折叠渲染", () => {
 	const generic = renderers("powershell");
-	const running = ctx({ isPartial: true, durationMs: undefined, args: { script: "Get-Process" } });
+	const running = ctx({ isPartial: true, durationMs: undefined, state: { startedAt: Date.now() - 1200 }, args: { script: "Get-Process" } });
 	assert.equal(dedent(text(generic.renderCall({ script: "Get-Process" }, theme, running))), "powershell Get-Process");
-	assert.equal(dedent(text(generic.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running))), "powershell · running");
+	assert.match(
+		dedent(text(generic.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running))),
+		/^powershell · running \(1\.[2-3]s\)$/,
+	);
 	const done = ctx({ args: { script: "Get-Process" }, durationMs: 1200 });
 	assert.equal(
 		dedent(text(generic.renderResult({ content: [{ type: "text", text: "p1\np2" }] }, { expanded: false, isPartial: false }, theme, done))),
