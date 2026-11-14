@@ -349,6 +349,34 @@ check("请求开头带文本的回复留在摘要外，它引发的工具并入�
 	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 5s, ran 4 shell commands");
 });
 
+check("带文本回复的耗时并入摘要后，不再单独显示耗时标签", () => {
+	const text = assistantRow({ thinking: "想一想", text: "我先看看目录" });
+	applyThoughtLabel(text, 2000);
+	const mode = fakeMode([
+		text,
+		finishedBash("c1", "ls"),
+		assistantRow({}),
+		finishedBash("c2", "pwd"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
+
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"), false, "标签不应与摘要行重复");
+});
+
+check("没有摘要承载耗时时，消息自己的耗时标签保留", () => {
+	const text = assistantRow({ thinking: "想一想", text: "我先看看目录" });
+	applyThoughtLabel(text, 2000);
+	const mode = fakeMode([text, finishedBash("c1", "ls")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
+
+	assert.equal(summariesOf(mode).length, 0);
+	assert.ok(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"));
+});
+
 check("请求中间出现带文本的回复时两侧各自成行", () => {
 	const mode = fakeMode([
 		assistantRow({}),

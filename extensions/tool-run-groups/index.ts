@@ -63,6 +63,7 @@ interface ToolRow extends Component {
 interface AssistantInternals extends Component {
 	markdownSlots?: Array<{ kind: string }>;
 	lastMessage?: { stopReason?: string };
+	hiddenThinkingLabel?: string;
 	setHiddenThinkingLabel?(label: string): void;
 }
 
@@ -133,6 +134,13 @@ export function thoughtLabel(thoughtMs: number, theme?: Theme): string {
 /** 把一条已结束消息的隐藏思考标签换成实际耗时。 */
 export function applyThoughtLabel(assistant: Component, thoughtMs: number): void {
 	(assistant as AssistantInternals).setHiddenThinkingLabel?.(thoughtLabel(thoughtMs, activeTheme));
+}
+
+/** 摘要行已经展示这段耗时，隐藏消息自己的标签，避免同一段思考显示两行。 */
+export function clearThoughtLabel(assistant: Component): void {
+	const internals = assistant as AssistantInternals;
+	if (internals.hiddenThinkingLabel === "") return;
+	internals.setHiddenThinkingLabel?.("");
 }
 
 /** 每条助手消息的思考耗时，在 `message_end` 时记录，多轮摘要从这里累加。 */
@@ -535,11 +543,13 @@ export function groupSilentTurns(
 
 		const items = region.items;
 		const reused = previous.get(flat[index]!);
+		// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要。
+		const preceding = flat[index - 1];
+		const extraThought = preceding instanceof AssistantMessageComponent ? preceding : undefined;
+		const thoughtMs = extraThought ? (options.thoughtMsFor ?? thoughtFromMessage)(extraThought) : undefined;
 		if (reused && sameItems(reused.children, items)) {
 			next.push(reused);
 		} else {
-			// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要。
-			const preceding = flat[index - 1];
 			next.push(
 				new ToolRunSummary({
 					items,
@@ -547,10 +557,12 @@ export function groupSilentTurns(
 					theme: () => activeTheme,
 					requestRender: () => mode.ui?.requestRender?.(),
 					thoughtMsFor: options.thoughtMsFor,
-					extraThought: preceding instanceof AssistantMessageComponent ? preceding : undefined,
+					extraThought,
 				}),
 			);
 		}
+		// 耗时已在摘要行里，消息自己的 `Thought for Ns` 标签不再重复。
+		if (extraThought && thoughtMs !== undefined && thoughtMs > 0) clearThoughtLabel(extraThought);
 		index = region.end - 1;
 	}
 
