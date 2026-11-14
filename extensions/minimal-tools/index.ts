@@ -8,17 +8,8 @@
  * 展开（Ctrl+O）或出错时显示完整内容。
  */
 
-import type { ExtensionAPI, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import {
-	createBashToolDefinition,
-	createEditToolDefinition,
-	createFindToolDefinition,
-	createGrepToolDefinition,
-	createLsToolDefinition,
-	createReadToolDefinition,
-	createWriteToolDefinition,
-	formatReadLineRange,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolRenderers, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { formatReadLineRange } from "@earendil-works/pi-coding-agent";
 import { Box, type Color, type Component, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { homedir } from "node:os";
 
@@ -101,6 +92,14 @@ function firstText(result: { content: Array<{ type: string; text?: string }> }):
 
 function countLines(text: string): number {
 	return text.trim().split("\n").filter(Boolean).length;
+}
+
+/** 结果末尾的 `[...]` 提示行（达到上限、被截断等）不是数据行，统计时剔除。 */
+const TRAILING_NOTICE = /\n\n\[[^\]\n]*\]\s*$/;
+
+/** 统计结果数据行数，忽略工具附加的尾部提示。 */
+function countEntries(text: string): number {
+	return countLines(text.replace(TRAILING_NOTICE, ""));
 }
 
 /** 把连续空行压成一个，避免展开区域出现大片留白。 */
@@ -375,13 +374,13 @@ function summaryLine(
 	const body = ok
 		? theme.fg("toolOutput", description)
 		: theme.fg("error", description);
-	const prefix = ok ? "  " : `${theme.fg("error", "✗")} `;
+	const prefix = ok ? " " : `${theme.fg("error", "✗")} `;
 	return new Text(`${prefix}${body}${tail}`, context.outputPad, 0);
 }
 
-/** 运行中占位，前缀与图标等宽的空白。 */
+/** 运行中占位，前缀与思考块标签对齐。 */
 function runningLine(theme: RenderTheme, label: string, pad: number): Text {
-	return new Text(theme.fg("muted", `  ${label} · running`), pad, 0);
+	return new Text(theme.fg("muted", ` ${label} · running`), pad, 0);
 }
 
 /**
@@ -529,28 +528,68 @@ function renderWriteResult(
 }
 
 // ============================================================================
-// 扩展入口
+// 表外工具的通用折叠
 // ============================================================================
 
-export default function (pi: ExtensionAPI) {
-	const cwd = process.cwd();
+/** 调用摘要：取第一个非空字符串参数，退化为 JSON 单行。 */
+function argsSummary(args: unknown): string {
+	if (args && typeof args === "object") {
+		for (const value of Object.values(args as Record<string, unknown>)) {
+			if (typeof value === "string" && value.trim() !== "") return oneLine(value, 40);
+		}
+		const json = JSON.stringify(args);
+		if (json && json !== "{}") return oneLine(json, 40);
+	}
+	return "";
+}
 
-	// 思考块标签前补一个空格，与工具块的缩进对齐。
-	pi.on("session_start", async (_event, ctx) => {
-		ctx.ui.setHiddenThinkingLabel(" Thinking...");
-	});
+/** 结果含非文本片段（如图片）时，交回 Pi 内置渲染，避免折叠丢内容。 */
+function hasRichContent(result: { content: Array<{ type: string }> }): boolean {
+	return result.content.some((part) => part.type !== "text");
+}
 
-	const bash = createBashToolDefinition(cwd);
-	const read = createReadToolDefinition(cwd);
-	const write = createWriteToolDefinition(cwd);
-	const edit = createEditToolDefinition(cwd);
-	const grep = createGrepToolDefinition(cwd);
-	const find = createFindToolDefinition(cwd);
-	const ls = createLsToolDefinition(cwd);
+/**
+ * 表外工具的兜底渲染：与内置工具同一套两阶段策略。
+ * 新增工具无需改动本扩展即可获得折叠显示。
+ */
+function genericRenderers(toolName: string, base: ToolRenderers | undefined): ToolRenderers {
+	return {
+		renderShell: "self",
+		renderCall(args, theme, context) {
+			if (!shouldShowCall(context)) {
+				return new Text("", context.outputPad, 0);
+			}
+			const title = theme.fg("toolTitle", theme.bold(toolName));
+			const summary = argsSummary(args);
+			const detail = summary ? ` ${theme.fg("accent", summary)}` : "";
+			return new Text(`${title}${detail}`, context.outputPad, 0);
+		},
+		renderResult(result, options, theme, context) {
+			if (base?.renderResult && hasRichContent(result)) {
+				return base.renderResult(result, options, theme, context);
+			}
+			const summary = argsSummary(context.args);
+			return renderResultText(
+				result,
+				options,
+				theme,
+				context,
+				(output) => `${toolName} · ${plural(countEntries(output), "line")}`,
+				toolName,
+				summary ? `${toolName} ${summary}` : toolName,
+			);
+		},
+	};
+}
 
+// ============================================================================
+// 定制渲染表
+// ============================================================================
+
+// 只覆盖渲染槽：执行仍走 Pi 内置定义，shellPath 与 PI_* 变量照常生效。
+const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	// ---------------------------------------------------------------- bash
-	pi.registerTool({
-		...bash,
+	bash: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			const command = typeof args?.command === "string" ? args.command : "";
@@ -574,11 +613,10 @@ export default function (pi: ExtensionAPI) {
 				`$ ${oneLine(typeof context.args?.command === "string" ? context.args.command : "") || "..."}`,
 			);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- read
-	pi.registerTool({
-		...read,
+	read: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -604,11 +642,10 @@ export default function (pi: ExtensionAPI) {
 				`read ${shortenPath(typeof context.args?.path === "string" ? context.args.path : "")}${formatReadLineRange(context.args?.offset, context.args?.limit) ?? ""}`,
 			);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- write
-	pi.registerTool({
-		...write,
+	write: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -624,11 +661,10 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, options, theme, context) {
 			return renderWriteResult(result, options, theme, context);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- edit
-	pi.registerTool({
-		...edit,
+	edit: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -644,11 +680,10 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, options, theme, context) {
 			return renderEditResult(result, options, theme, context);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- grep
-	pi.registerTool({
-		...grep,
+	grep: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -667,16 +702,15 @@ export default function (pi: ExtensionAPI) {
 				options,
 				theme,
 				context,
-				(output) => `grep ${plural(countLines(output), "match", "matches")}`,
+				(output) => `grep ${plural(countEntries(output), "match", "matches")}`,
 				"grep",
 				`grep /${oneLine(typeof context.args?.pattern === "string" ? context.args.pattern : "", 40)}/`,
 			);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- find
-	pi.registerTool({
-		...find,
+	find: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -695,16 +729,15 @@ export default function (pi: ExtensionAPI) {
 				options,
 				theme,
 				context,
-				(output) => `found ${plural(countLines(output), "file")}`,
+				(output) => `found ${plural(countEntries(output), "file")}`,
 				"find",
 				`find ${oneLine(typeof context.args?.pattern === "string" ? context.args.pattern : "", 40)}`,
 			);
 		},
-	});
+	},
 
 	// ---------------------------------------------------------------- ls
-	pi.registerTool({
-		...ls,
+	ls: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
 			if (!shouldShowCall(context)) {
@@ -724,10 +757,27 @@ export default function (pi: ExtensionAPI) {
 				options,
 				theme,
 				context,
-				(output) => `ls ${path} · ${plural(countLines(output), "entry", "entries")}`,
+				(output) => `ls ${path} · ${plural(countEntries(output), "entry", "entries")}`,
 				"ls",
 				`ls ${path}`,
 			);
 		},
+	},
+};
+
+// ============================================================================
+// 扩展入口
+// ============================================================================
+
+export default function (pi: ExtensionAPI) {
+	// 思考块标签前补一个空格，与工具块的缩进对齐。
+	pi.on("session_start", async (_event, ctx) => {
+		ctx.ui.setHiddenThinkingLabel(" Thinking...");
+	});
+
+	// 表内工具用定制渲染；表外工具自动套用同一套两阶段折叠。
+	pi.registerToolRenderer((toolName, next) => {
+		const custom = CUSTOM_RENDERERS[toolName];
+		return custom ?? genericRenderers(toolName, next());
 	});
 }

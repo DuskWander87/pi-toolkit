@@ -14,6 +14,7 @@ Pi coding agent 的增强与改造扩展集合。
 pi-toolkit/
 ├── docs/                # 设计与实施方案
 ├── extensions/          # 扩展源码
+├── test/                # 渲染逻辑回归用例
 └── README.md
 ```
 
@@ -49,6 +50,20 @@ ln -s /mnt/d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensi
 
 ```bash
 pi -e /mnt/d/code/github/pi-toolkit/extensions/minimal-tools/index.ts
+```
+
+## 测试
+
+渲染逻辑的回归用例放在 `test/`，直接调用扩展注册的 `renderCall` / `renderResult` 并断言渲染字符串：
+
+```bash
+npx tsx test/render.test.ts
+```
+
+依赖可从 `@earendil-works/*` 解析：本机（Pi 安装在 `~/.pi/agent/install`）用目录联接即可：
+
+```powershell
+cmd /c mklink /J D:\code\github\pi-toolkit\node_modules C:\Users\<user>\.pi\agent\install\releases\<version>\node_modules
 ```
 
 ## 参考
