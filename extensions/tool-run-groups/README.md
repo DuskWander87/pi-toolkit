@@ -15,8 +15,8 @@
   Thought for 1s, ran 1 read call
   ... (read 的路径与内容在展开后可见)
 
-执行中
-  Running 3 shell commands…
+执行中（工具行保持原样，带实时计时）
+● read · running (1.2s)
 
 有失败时
   Thought for 12s, ran 3 shell commands · 1 failed
@@ -28,7 +28,7 @@
 
 | 级别 | 范围 | 结果 |
 |---|---|---|
-| 单轮 | 一条助手消息内连续的至少 2 个工具行 | 收成一行 `ran ...` |
+| 单轮 | 一条助手消息内连续的至少 2 个且都已执行结束的工具行 | 收成一行 `ran ...` |
 | 请求 | 一个用户请求内，从第一段工具调用到下一次用户消息之前 | 整个区间只留一行摘要，正文照常显示，思考耗时按轮累加 |
 
 ### 会聚合的内容
@@ -41,6 +41,7 @@
 ### 不聚合的内容
 
 - 单轮内只有一条工具调用时第一级不聚合，由请求级摘要折叠成 `ran 1 read call`
+- 执行中的工具段不折叠：保留 `minimal-tools` 的实时行与计时，工具结束后由 `tool_execution_end` 触发一次重新扫描，合成摘要
 - `edit` / `write` 始终逐条渲染；它们可以出现在折叠区间内，但不计入摘要
 - 被中断、报错或截断的轮次是硬边界
 - 用户消息是硬边界；请求开头那条带正文的回复留在区间外，作为摘要行的耗时来源
@@ -51,7 +52,7 @@
 |---|---|
 | 收起，有思考耗时 | `Thought for 28s, ran 8 shell commands` |
 | 收起，无思考耗时 | `ran 8 shell commands` |
-| 执行中 | `Running 3 shell commands…` |
+| 执行中 | `Running 3 shell commands…`（仅限已折叠的区间；未结束的工具段不折叠） |
 | 有失败 | 在末尾追加 ` · 1 failed`，只有这一段标红，摘要正文保持 dim |
 
 工具名按首次出现顺序汇总，`bash` 显示为 `shell`：
@@ -99,13 +100,13 @@ pi -e <仓库路径>/extensions/tool-run-groups/index.ts
 
 - 单独安装即可工作，Pi 内置工具行与 `minimal-tools` 渲染的工具行都能聚合
 - 与 `message-marks` 共用 2 列标记栏：摘要行缩进 2 列，但不由 `message-marks` 加圆点
-- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是两阶段渲染的完整内容
+- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是两阶段渲染的完整内容；执行中的工具行按 `minimal-tools` 的实时行呈现，结束后才合成摘要行
 
 ## 实现原理
 
 Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` 消息），因此本扩展接管 `InteractiveMode` 的两个私有方法：
 
-- `handleEvent`：在 `message_end` 之后记录思考耗时、替换隐藏思考标签，并聚合当前工具行
+- `handleEvent`：在 `message_end` 之后记录思考耗时、替换隐藏思考标签，并聚合当前工具行；在 `tool_execution_end` 之后重新扫描一次，把刚跑完的工具收进摘要
 - `renderSessionItems`：历史回放结束后同样聚合
 
 聚合只是把 Pi 自己创建并持续更新的 `ToolExecutionComponent` 移入容器组件，工具执行、结果回填与会话数据都不受影响。重复聚合不会叠加；区间未变化时复用原实例，保留用户的折叠状态。如果 `InteractiveMode` 的内部方法缺失，安装失败并在 `session_start` 时提示。
@@ -113,6 +114,7 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 ## 限制
 
 - **依赖 `InteractiveMode` 私有成员**：`handleEvent`、`renderSessionItems`、`chatContainer`、`toolOutputExpanded` 都不是公开 API
+- **执行期间有一段过渡态**：工具段在执行中不折叠，于是从思考结束到工具跑完之间会同时看到 `Thought for Ns` 与带实时计时的工具行，工具结束后才收敛成一行摘要。实时计时与“从思考结束起就只有一行”不可兼得，当前选前者：长命令执行期间，命令行和计时比提前合并更有用
 - **静默轮次判定依赖助手组件内部字段**：`markdownSlots` 与 `lastMessage.stopReason`；结构变化时退化到不合并，不会错误地藏起内容
 - **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，回放出来的摘要行与隐藏标签不带 `Thought for Ns`
 - **思考可见性开关只作用于未折叠的消息**：Pi 的 `updateThinkingBlockVisibility` / `setHiddenThinkingLabel` 只遍历 `chatContainer` 顶层，被折叠进摘要的轮次收不到更新，切换后需要重建会话才同步
@@ -123,7 +125,7 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 node_modules/.bin/jiti test/tool-run-groups.test.ts
 ```
 
-覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、展开状态传递、点击行为与实例复用。
+覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、执行中不折叠、展开状态传递、点击行为与实例复用。
 
 ---
 

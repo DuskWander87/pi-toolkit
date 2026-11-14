@@ -3,17 +3,17 @@
  *
  * 两级聚合，把工具调用收成摘要行（Claude Code 风格）。
  *
- * 第一级——单轮工具行 `ToolRunGroup`：同一轮助手回复里的连续工具行收成一行，
- * `edit` / `write` 不参与，单条调用留给请求级摘要行。
+ * 第一级——单轮工具行 `ToolRunGroup`：同一轮助手回复里连续且都已结束的工具行收成
+ * 一行，`edit` / `write` 不参与，单条调用留给请求级摘要行。
  *
  * 第二级——请求摘要 `ToolRunSummary`：一个用户请求内的思考、工具调用与回复正文只留
  * 一行摘要，耗时按轮累加。正文照常逐条渲染在摘要行下方，但不再各自附带一行
  * `Thought for Ns`；被中断或报错的轮次是硬边界。`edit` / `write` 行参与区间，但
  * 摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
- * 收起：`Thought for 28s, ran 8 shell commands`；执行中 `Running 3 shell commands…`。
- * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
- * 不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
+ * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具段不折叠，保留带实时
+ * 计时的工具行，`tool_execution_end` 后再合成摘要。有失败时只把计数片段标红
+ * （`· 1 failed`），摘要正文保持 dim——一两个调用失败不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
  * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
  *
  * Pi 没有消息级的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -105,7 +105,7 @@ export function summarize(toolNames: readonly string[]): string {
 		.join(", ");
 }
 
-/** 是否值得聚合：至少两个调用，且不含 `edit` / `write`。 */
+/** 是否值得聚合：至少两个调用，且不含 `edit` / `write`。执行状态由调用方判断。 */
 export function isGroupable(toolNames: readonly string[]): boolean {
 	return toolNames.length >= MIN_RUN && toolNames.every((name) => !SOLO_TOOLS.has(name));
 }
@@ -297,7 +297,7 @@ export function groupToolRuns(
 		index = end;
 
 		const toolNames = run.map((item) => String(item.toolName));
-		if (!isGroupable(toolNames)) {
+		if (!isGroupable(toolNames) || run.some((item) => item.isPartial)) {
 			next.push(...run);
 			continue;
 		}
@@ -498,6 +498,19 @@ function isRegionStart(value: unknown): boolean {
 	return isToolSegment(value) || isSilentTurn(value);
 }
 
+/** 区间内还有执行中的工具段：保留 minimal-tools 的实时行与计时，不折叠。 */
+function hasRunningTool(items: readonly Component[]): boolean {
+	for (const item of items) {
+		if (!isToolSegment(item)) continue;
+		if (item instanceof ToolRunGroup) {
+			if (item.stats().running) return true;
+		} else if ((item as ToolRow).isPartial) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /**
  * 区间内普通工具段的数量：一段都没有时没有可摘要的内容。
  *
@@ -522,6 +535,8 @@ function readRegion(children: readonly Component[], index: number): Region | und
 	let cursor = index;
 	while (cursor < children.length && isAbsorbable(children[cursor])) items.push(children[cursor++]!);
 	if (countedSegments(items) === 0) return undefined;
+	// 执行中先留原行：摘要行只有计数，看不到命令与实时计时。
+	if (hasRunningTool(items)) return undefined;
 	return { items, end: cursor };
 }
 
@@ -675,6 +690,13 @@ function lastAssistantChild(mode: GroupableMode): Component | undefined {
 	return undefined;
 }
 
+/** 重新扫描一次：先做单轮聚合，再做请求级摘要。 */
+export function refreshToolRuns(mode: GroupableMode): void {
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	mode.ui?.requestRender?.();
+}
+
 /** 接管 `InteractiveMode` 的事件分发与历史回放，重复加载不会叠加。 */
 export function installToolRunGroups(): boolean {
 	const prototype = InteractiveMode.prototype as unknown as Record<PropertyKey, unknown> & GroupableMode;
@@ -689,13 +711,13 @@ export function installToolRunGroups(): boolean {
 		trackThinking(event);
 		await handleEvent.call(this, event);
 		finishMessage(this, event);
+		// 工具跑完后才能收成摘要行：执行中保留带实时计时的工具行。
+		if ((event as { type?: string } | undefined)?.type === "tool_execution_end") refreshToolRuns(this);
 	};
 
 	prototype.renderSessionItems = function (this: GroupableMode, ...args: unknown[]) {
 		const result = renderSessionItems.apply(this, args);
-		groupToolRuns(this);
-		groupSilentTurns(this);
-		this.ui?.requestRender?.();
+		refreshToolRuns(this);
 		return result;
 	};
 

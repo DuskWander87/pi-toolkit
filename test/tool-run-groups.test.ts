@@ -131,11 +131,27 @@ check("单条调用与含 edit 的连续行保持原样", () => {
 });
 
 check("被非工具行分隔的连续段各自聚合", () => {
-	const mode = fakeMode([bashRow("c1", "ls"), bashRow("c2", "pwd"), new Container(), bashRow("c3", "id"), bashRow("c4", "date")]);
+	const mode = fakeMode([
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		new Container(),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
 	groupToolRuns(mode);
 	assert.equal(mode.chatContainer.children.length, 3);
 	const groups = mode.chatContainer.children.filter((child) => child instanceof ToolRunGroup);
 	assert.equal(groups.length, 2);
+});
+
+check("执行中的工具行不聚合，保留带实时计时的原行", () => {
+	const mode = fakeMode([bashRow("c1", "sleep 5"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	assert.equal(mode.chatContainer.children.length, 2);
+	assert.equal(
+		mode.chatContainer.children.filter((child) => child instanceof ToolRunGroup).length,
+		0,
+	);
 });
 
 check("收起态是空行 + 一行摘要，缩进到标记栏所在列", () => {
@@ -166,9 +182,14 @@ check("展开态先摘要行，再铺开每个工具行的完整内容", () => {
 });
 
 check("执行中显示 Running，失败时标注数量", () => {
-	const running = fakeMode([bashRow("c1", "ls"), finish(bashRow("c2", "pwd"))]);
-	groupToolRuns(running);
-	assert.ok(plain(groupOf(running).render(WIDTH))[1]!.includes("Running 2 shell commands"));
+	const running = new ToolRunGroup({
+		rows: [bashRow("c1", "ls"), bashRow("c2", "pwd")],
+		toolNames: ["bash", "bash"],
+		expanded: false,
+		theme: () => undefined,
+		requestRender() {},
+	});
+	assert.ok(plain(running.render(WIDTH))[1]!.includes("Running 2 shell commands"));
 
 	const failed = fakeMode([finishedBash("c1", "ls"), finish(bashRow("c2", "pwd"), true)]);
 	groupToolRuns(failed);
@@ -576,7 +597,7 @@ check("单条工具行组成的静默轮次同样折叠", () => {
 });
 
 check("edit 不计入摘要行的工具段，仍逐条渲染", () => {
-	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const edit = finish(toolRow("edit", "e1", { path: "a.ts" }));
 	const mode = fakeMode([
 		assistantRow({}),
 		edit,
@@ -594,7 +615,7 @@ check("edit 不计入摘要行的工具段，仍逐条渲染", () => {
 });
 
 check("edit / write 参与区间但不被摘要行代表，收起时逐条渲染", () => {
-	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const edit = finish(toolRow("edit", "e1", { path: "a.ts" }));
 	const mode = fakeMode([
 		assistantRow({}),
 		finishedBash("c1", "ls"),
@@ -683,7 +704,7 @@ check("思考结束后隐藏思考标签显示实际耗时", () => {
 });
 
 check("收起态点击改动行交给行自己处理", () => {
-	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const edit = finish(toolRow("edit", "e1", { path: "a.ts" }));
 	let forwarded: number | undefined;
 	(edit as any).handleMouse = (event: any) => {
 		forwarded = event.y;
