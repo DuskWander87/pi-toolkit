@@ -1,0 +1,41 @@
+# 项目文档（仅本地保留）
+docs/
+
+# 依赖
+node_modules/
+.pnp/
+.pnp.js
+.yarn/cache
+.yarn/install-state.gz
+
+# 构建产物
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# 测试与覆盖率
+coverage/
+.nyc_output/
+
+# 日志与临时文件
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# 环境变量与本地密钥
+.env
+.env.*
+!.env.example
+
+# 编辑器与 IDE
+.idea/
+.vscode/
+*.iml
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
