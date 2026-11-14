@@ -8,7 +8,7 @@ Pi coding agent 的增强与改造扩展集合。
 |---|---|---|
 | `minimal-tools` | 工具调用两阶段显示（收起单行摘要 / 展开背景色块）；`edit` / `write` 默认展示改动内容；运行中显示实时耗时；思考块收起标签为 `Thinking...` | 可用 |
 | `message-marks` | Claude Code 式 2 列标记栏：用户消息与输入框 `›`；助手文本块 `●`；工具调用 `●`（进行中灰、成功蓝、失败红）。续行、思考行与工具块统一对齐到第 2 列 | 可用 |
-| `tool-run-groups` | 把同一轮回复里的连续工具调用收成一行摘要：`Thought for 2s, ran 3 shell commands`；Ctrl+O 或点击摘要行展开为逐条完整内容；`edit` / `write` 不参与聚合 | 可用 |
+| `tool-run-groups` | 两级聚合：同一轮的工具行收成一行；两条带文本的回复之间（或用户消息与首条回复之间）的工具调用只留一行摘要（`Thought for 28s, ran 8 shell commands`）；带文本的回复照常显示、不进折叠，中斷/报错的轮次是边界；`edit` / `write` 不计入摘要行，收起时也逐条渲染；Ctrl+O 或点击摘要行展开为完整时间线 | 可用 |
 
 ## 目录结构
 
@@ -24,7 +24,7 @@ pi-toolkit/
 
 Pi 从 `~/.pi/agent/extensions/` 自动发现 `<name>/index.ts`。
 
-以 `minimal-tools` 与 `message-marks` 为例：
+以三个扩展为例：
 
 ```bash
 ln -s /d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
@@ -37,6 +37,7 @@ ln -s /d/code/github/pi-toolkit/extensions/tool-run-groups ~/.pi/agent/extension
 ```bash
 ln -s /mnt/d/code/github/pi-toolkit/extensions/minimal-tools ~/.pi/agent/extensions/minimal-tools
 ln -s /mnt/d/code/github/pi-toolkit/extensions/message-marks ~/.pi/agent/extensions/message-marks
+ln -s /mnt/d/code/github/pi-toolkit/extensions/tool-run-groups ~/.pi/agent/extensions/tool-run-groups
 ```
 
 安装后在 Pi 中执行 `/reload`，或重启会话。

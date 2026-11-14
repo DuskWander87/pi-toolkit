@@ -4,13 +4,22 @@
  * 运行：node_modules/.bin/jiti test/tool-run-groups.test.ts
  */
 import assert from "node:assert";
-import { ToolExecutionComponent, initTheme } from "@earendil-works/pi-coding-agent";
+import {
+	AssistantMessageComponent,
+	ToolExecutionComponent,
+	UserMessageComponent,
+	getMarkdownTheme,
+	initTheme,
+} from "@earendil-works/pi-coding-agent";
 import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
 import extend, {
 	ToolRunGroup,
+	ToolRunSummary,
 	describeRun,
+	groupSilentTurns,
 	groupToolRuns,
 	isGroupable,
+	isSilentTurn,
 	summarize,
 } from "../extensions/tool-run-groups/index.ts";
 
@@ -166,6 +175,31 @@ check("执行中显示 Running，失败时标注数量", () => {
 	assert.ok(line.includes("1 failed"), line);
 });
 
+check("失败只把计数片段标红，摘要正文保持 dim", () => {
+	const themed = () => ({ fg: (name: string, text: string) => `{${name}|${text}}` }) as any;
+	const rows = [finishedBash("c1", "ls"), finish(bashRow("c2", "pwd"), true)];
+	const group = new ToolRunGroup({
+		rows,
+		toolNames: ["bash", "bash"],
+		expanded: false,
+		theme: themed,
+		requestRender() {},
+	});
+	const groupLine = group.render(200)[1]!;
+	assert.ok(groupLine.includes("{dim|ran 2 shell commands}"), groupLine);
+	assert.ok(groupLine.includes("{error| · 1 failed}"), groupLine);
+
+	const summary = new ToolRunSummary({
+		items: [group],
+		expanded: false,
+		theme: themed,
+		requestRender() {},
+	});
+	const summaryLine = summary.render(200)[1]!;
+	assert.ok(summaryLine.includes("{dim|ran 2 shell commands}"), summaryLine);
+	assert.ok(summaryLine.includes("{error| · 1 failed}"), summaryLine);
+});
+
 check("思考耗时只计入刚结束的那条消息", () => {
 	const matched = fakeMode([finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
 	groupToolRuns(matched, { ids: new Set(["c1", "c2"]), thoughtMs: 3200 });
@@ -200,6 +234,322 @@ check("摘要行不超过渲染宽度", () => {
 	const narrow = plain(groupOf(mode).render(12));
 	assert.equal(narrow.length, 2);
 	assert.ok(narrow[1]!.length <= 12, JSON.stringify(narrow[1]));
+});
+
+/** 助手消息：思考块隐藏时只渲染标签行；`text` 才是可见文本。 */
+function assistantRow(options: { text?: string; thinking?: string; stopReason?: string } = {}) {
+	const content: Array<Record<string, unknown>> = [];
+	if (options.thinking !== undefined) content.push({ type: "thinking", thinking: options.thinking });
+	if (options.text !== undefined) content.push({ type: "text", text: options.text });
+	return new AssistantMessageComponent(
+		{ content, stopReason: options.stopReason ?? "stop" } as never,
+		true,
+		getMarkdownTheme(),
+		"Thinking...",
+		1,
+		[],
+	);
+}
+
+function summariesOf(mode: { chatContainer: Container }): ToolRunSummary[] {
+	return mode.chatContainer.children.filter(
+		(child) => child instanceof ToolRunSummary,
+	) as ToolRunSummary[];
+}
+
+check("同一条消息被分隔成多段时，耗时只计在第一段", () => {
+	const mode = fakeMode([
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		new Container(),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode, { ids: new Set(["c1", "c2", "c3", "c4"]), thoughtMs: 2400 });
+
+	const groups = mode.chatContainer.children.filter(
+		(child) => child instanceof ToolRunGroup,
+	) as ToolRunGroup[];
+	assert.equal(groups.length, 2);
+	assert.ok(plain(groups[0]!.render(WIDTH))[1]!.includes("Thought for 2s"), "第一段带耗时");
+	assert.equal(plain(groups[1]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+});
+
+check("静默轮次判定：隐藏思考或空内容算静默，可见文本与中断报错不算", () => {
+	assert.equal(isSilentTurn(assistantRow({ thinking: "想一想" })), true);
+	assert.equal(isSilentTurn(assistantRow({})), true);
+	assert.equal(isSilentTurn(assistantRow({ text: "我发现了问题" })), false);
+	assert.equal(isSilentTurn(assistantRow({ stopReason: "error" })), false);
+	assert.equal(isSilentTurn(assistantRow({ stopReason: "aborted" })), false);
+	assert.equal(isSilentTurn(assistantRow({ stopReason: "length" })), false);
+	assert.equal(isSilentTurn(finishedBash("c1", "ls")), false);
+});
+
+check("连续静默轮次合并成一行摘要，耗时按轮累加", () => {
+	const mode = fakeMode([
+		assistantRow({ thinking: "看看目录" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ thinking: "再看看文件" }),
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 1500 });
+
+	assert.equal(mode.chatContainer.children.length, 1);
+	const summary = summariesOf(mode)[0]!;
+	const lines = plain(summary.render(WIDTH));
+	assert.equal(lines.length, 2);
+	assert.equal(lines[1]!.trimStart(), "Thought for 3s, ran 4 shell commands");
+});
+
+check("多轮摘要展开后是完整时间线", () => {
+	const mode = fakeMode([
+		assistantRow({ thinking: "第一轮" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ thinking: "第二轮" }),
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+	summary.setExpanded(true);
+
+	const lines = plain(summary.render(WIDTH));
+	assert.equal(lines[0], "");
+	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(lines.filter((line) => line.includes("Thinking...")).length, 2, JSON.stringify(lines));
+	// 折叠内仍有两组各自的摘要行。
+	assert.equal(lines.filter((line) => line.trimStart().startsWith("ran 2 shell commands")).length, 2);
+	assert.ok(lines.length > 8, JSON.stringify(lines));
+});
+
+check("请求开头带文本的回复留在摘要外，它引发的工具并入同一行", () => {
+	const text = assistantRow({ text: "我先看看目录" });
+	const mode = fakeMode([
+		text,
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode, { ids: new Set(["c1", "c2"]), thoughtMs: 2000 });
+	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : 3000) });
+
+	assert.equal(mode.chatContainer.children.length, 2);
+	assert.equal(mode.chatContainer.children[0], text);
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(summary.children.includes(text), false, "带文本的回复不进入折叠");
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 5s, ran 4 shell commands");
+});
+
+check("请求中间出现带文本的回复时两侧各自成行", () => {
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+		assistantRow({ text: "我发现了问题" }),
+		assistantRow({}),
+		finishedBash("c5", "cat a"),
+		finishedBash("c6", "cat b"),
+		assistantRow({}),
+		finishedBash("c7", "grep x"),
+		finishedBash("c8", "grep y"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 2);
+	assert.equal(mode.chatContainer.children.length, 3);
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+});
+
+check("只有一段工具调用时先交给第一级，后续轮次到位后合成一行", () => {
+	const text = assistantRow({ text: "我先看看目录" });
+	const mode = fakeMode([text, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode, { ids: new Set(["c1", "c2"]), thoughtMs: 1000 });
+	groupSilentTurns(mode);
+	assert.equal(summariesOf(mode).length, 0);
+	assert.equal(mode.chatContainer.children.length, 2);
+
+	mode.chatContainer.addChild(assistantRow({}));
+	mode.chatContainer.addChild(finishedBash("c3", "id"));
+	mode.chatContainer.addChild(finishedBash("c4", "date"));
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(mode.chatContainer.children.length, 2);
+	assert.equal(mode.chatContainer.children[0], text);
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"ran 4 shell commands",
+	);
+});
+
+check("有可见文本的轮次作为边界，不跨轮合并", () => {
+	const mode = fakeMode([
+		assistantRow({ thinking: "a" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ text: "我发现了问题" }),
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 0);
+	assert.equal(mode.chatContainer.children.length, 4);
+});
+
+check("用户消息作为边界，两侧各自折叠", () => {
+	const user = () => new UserMessageComponent("继续", getMarkdownTheme(), 1);
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+		user(),
+		assistantRow({}),
+		finishedBash("c5", "ls"),
+		finishedBash("c6", "pwd"),
+		assistantRow({}),
+		finishedBash("c7", "id"),
+		finishedBash("c8", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 2);
+	assert.equal(mode.chatContainer.children.length, 3);
+});
+
+check("报错与中断的轮次不参与折叠", () => {
+	const mode = fakeMode([
+		assistantRow({ stopReason: "error" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ stopReason: "aborted" }),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(summariesOf(mode).length, 0);
+});
+
+check("单条工具行组成的静默轮次同样折叠", () => {
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		assistantRow({}),
+		finishedBash("c2", "pwd"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+});
+
+check("只有一段普通调用时 edit 不触发摘要", () => {
+	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const mode = fakeMode([
+		assistantRow({}),
+		edit,
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 0);
+	assert.equal(mode.chatContainer.children.includes(edit), true);
+});
+
+check("edit / write 参与区间但不被摘要行代表，收起时逐条渲染", () => {
+	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		edit,
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(summaries[0]!.children.includes(edit), true);
+	const lines = plain(summaries[0]!.render(WIDTH));
+	// 摘要行只统计普通调用，改动内容在下面逐条显式。
+	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.ok(
+		lines.some((line) => line.includes("path=\"a.ts\"")),
+		JSON.stringify(lines),
+	);
+});
+
+check("重复折叠复用实例并保留展开状态", () => {
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const first = summariesOf(mode)[0]!;
+	first.setExpanded(true);
+
+	groupSilentTurns(mode);
+	assert.equal(summariesOf(mode)[0], first);
+	assert.equal(first.expanded, true);
+
+	mode.chatContainer.addChild(assistantRow({}));
+	mode.chatContainer.addChild(finishedBash("c5", "ls"));
+	mode.chatContainer.addChild(finishedBash("c6", "pwd"));
+	groupSilentTurns(mode);
+
+	const second = summariesOf(mode)[0]!;
+	assert.notEqual(second, first);
+	assert.equal(second.expanded, true);
+	assert.ok(plain(second.render(WIDTH))[1]!.includes("6 shell commands"));
+});
+
+check("Ctrl+O 的展开态传递到多轮摘要内的工具行", () => {
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+	summary.setExpanded(true);
+
+	for (const child of summary.children) {
+		if (child instanceof ToolRunGroup) assert.equal(child.expanded, true);
+	}
 });
 
 const failed = results.filter((r) => !r.ok);
