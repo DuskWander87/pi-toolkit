@@ -28,7 +28,8 @@
 | 助手消息首个文本块首行 | `●` | 同上 |
 | 工具调用首行：进行中 / 成功 | `●` | 固定蓝 `rgb(86,156,214)` |
 | 工具调用首行：失败 | `●` | 主题 `error`（红） |
-| `!` 命令、压缩/分支摘要、自定义消息、技能调用 | 无（只缩进） | — |
+| 技能调用首行 | `●` | 固定蓝 `rgb(86,156,214)` |
+| `!` 命令、压缩/分支摘要、自定义消息 | 无（只缩进） | — |
 
 ## 对齐方式
 
@@ -59,7 +60,9 @@
 
 ### 系统类消息
 
-`!` 命令、compaction / branch summary、custom message、skill invocation 只对齐左缘：
+技能调用与工具行同一套标记栏：去掉 Box 的背景色，首行加蓝色圆点，其余行缩进到第 2 列。
+
+`!` 命令、compaction / branch summary、custom message 只对齐左缘：
 
 - 不加圆点，不剥离原有的背景色
 - 满宽边框（如 bash 执行框的上下边框）与 `customRenderer` 的满宽输出在插入缩进后截回原宽度，右侧最多丢 2 列
@@ -98,7 +101,8 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 - `UserMessageComponent.render`：去背景色 + 首行前缀
 - `AssistantMessageComponent.render`：整条消息对齐 + 首个文本块圆点
 - `ToolExecutionComponent.render`：整块对齐 + 状态圆点
-- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`、`SkillInvocationMessageComponent`：统一补缩进，满宽行截回原宽度
+- `SkillInvocationMessageComponent.render`：去背景色 + 整块对齐 + 圆点
+- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`：统一补缩进，满宽行截回原宽度
 - `ctx.ui.setEditorComponent`：注册 `PromptPrefixEditor`
 
 安装时把原始 `render` 保存在 `Symbol.for` 键上，重复安装（含同进程 `/reload`）用新 wrapper 覆盖旧的，不会叠加；从没有保存原始方法的旧版本第一次升级后需要重启一次 Pi，之后 `/reload` 即可。渲染结果按组件缓存，内容未变时省去逐行正则与宽度计算。主题代理在 `session_start` 取得，切换主题后工具圆点颜色仍跟随。

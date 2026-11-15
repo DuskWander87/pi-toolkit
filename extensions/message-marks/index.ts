@@ -5,6 +5,7 @@
  * - 用户消息首行前加 `› `，其余行缩进对齐，便于区分用户输入与模型输出
  * - 助手消息首个文本块首行前加 `● `，其余行（含思考块）对齐到第 2 列
  * - 工具调用首行前加 `● `（进行中与成功蓝、失败红），整块对齐到第 2 列
+ * - 技能调用与工具行同一套标记栏：去掉背景色，首行前加 `● `（蓝）
  * - 输入框首行以 `› ` 起头，多行输入在等宽空白后对齐
  *
  * Pi 未暴露普通消息的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -56,7 +57,8 @@ const GUTTER_BASH = Symbol.for("pi-toolkit.message-marks.bash");
 const GUTTER_COMPACTION = Symbol.for("pi-toolkit.message-marks.compaction");
 const GUTTER_BRANCH = Symbol.for("pi-toolkit.message-marks.branch");
 const GUTTER_CUSTOM = Symbol.for("pi-toolkit.message-marks.custom");
-const GUTTER_SKILL = Symbol.for("pi-toolkit.message-marks.skill");
+/** 技能调用按工具行渲染：去背景、首行加圆点，需要自己的原始 `render` 存档。 */
+const ORIGINAL_SKILL = Symbol.for("pi-toolkit.message-marks.skill");
 /** `session_start` 取得的主题代理：切换主题后仍然跟随。 */
 let activeTheme: Theme | undefined;
 
@@ -329,16 +331,40 @@ export function installGutter(component: { prototype: object }, symbol: symbol):
 	};
 }
 
+/**
+ * 接管 SkillInvocationMessageComponent 的渲染：去掉 Box 的背景色，
+ * 与工具行一样对齐标记栏、首行加蓝色圆点。
+ */
+export function installSkillMark(
+	component: typeof SkillInvocationMessageComponent = SkillInvocationMessageComponent,
+): void {
+	const prototype = component.prototype as unknown as PatchedPrototype & Record<PropertyKey, unknown>;
+	const render = (prototype[ORIGINAL_SKILL] ??= prototype.render) as PatchedPrototype["render"];
+	prototype.render = function (this: PatchedPrototype, width: number): string[] {
+		const lines = render.call(this, width);
+		const marker = activeTheme ? activeTheme.style(MARKER, { fg: SUCCESS_MARKER_COLOR }) : MARKER;
+		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
+			const guttered = source.map((line) => {
+				const aligned = gutterLine(line.replace(BACKGROUND_SEQUENCE, ""));
+				return visibleWidth(aligned) > width ? truncateToWidth(aligned, width, "") : aligned;
+			});
+			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
+			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
+			return guttered;
+		});
+	};
+}
+
 /** 一次安装消息、工具与系统类组件的左缘对齐。 */
 export function installMessageMarks(): void {
 	installUserMessagePrefix();
 	installAssistantMarks();
 	installToolMarks();
+	installSkillMark();
 	installGutter(BashExecutionComponent, GUTTER_BASH);
 	installGutter(CompactionSummaryMessageComponent, GUTTER_COMPACTION);
 	installGutter(BranchSummaryMessageComponent, GUTTER_BRANCH);
 	installGutter(CustomMessageComponent, GUTTER_CUSTOM);
-	installGutter(SkillInvocationMessageComponent, GUTTER_SKILL);
 }
 
 /**

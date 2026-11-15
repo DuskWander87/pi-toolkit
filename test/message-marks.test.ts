@@ -380,11 +380,6 @@ check("系统类组件左缘对齐到第 2 列", () => {
 		systemMarkdown,
 		1,
 	);
-	const skill = new SkillInvocationMessageComponent(
-		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
-		systemMarkdown,
-		1,
-	);
 	const custom = new CustomMessageComponent(
 		{ role: "custom", customType: "demo", content: "自定义消息内容。", display: true, timestamp: 0 } as any,
 		undefined,
@@ -395,10 +390,38 @@ check("系统类组件左缘对齐到第 2 列", () => {
 
 	assertGutterAligned(compaction.render(WIDTH));
 	assertGutterAligned(branch.render(WIDTH));
-	assertGutterAligned(skill.render(WIDTH));
 	assertGutterAligned(custom.render(WIDTH));
 	assertGutterAligned(bash.render(WIDTH));
 	bash.setComplete(0, false);
+});
+
+check("skill 调用与工具行同一套标记栏：去背景、首行蓝圆点", () => {
+	const marker = testTheme.style("●", { fg: SUCCESS_MARKER_COLOR });
+	const skill = new SkillInvocationMessageComponent(
+		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
+		systemMarkdown,
+		1,
+	);
+
+	const assertSkillLines = (lines: string[]): void => {
+		const joined = lines.join("\n");
+		assert.equal(joined.includes("\x1b[48;"), false, "不应保留背景色");
+		assert.equal(joined.includes("\x1b[49m"), false, "不应保留背景复位");
+		const visible = plain(lines);
+		const row = visible.findIndex((line) => line.includes("[skill]"));
+		assert.ok(row !== -1, visible.join("\n"));
+		assert.ok(visible[row]!.startsWith("● [skill]"), JSON.stringify(visible[row]));
+		assert.ok(lines[row]!.includes(marker), JSON.stringify(visible[row]));
+		for (const [index, line] of lines.entries()) {
+			assert.ok(visibleWidth(line) <= WIDTH, `${visibleWidth(line)} > ${WIDTH}`);
+			if (index === row || isBlank(visible[index]!)) continue;
+			assert.equal(contentColumn(visible[index]!), 2, JSON.stringify(visible[index]));
+		}
+	};
+
+	assertSkillLines(skill.render(WIDTH));
+	skill.setExpanded(true);
+	assertSkillLines(skill.render(WIDTH));
 });
 
 check("bash 运行态与满宽边框不超宽", () => {
@@ -441,6 +464,15 @@ check("重复安装系统组件不叠加缩进", () => {
 		1,
 	);
 	assertGutterAligned(compaction.render(WIDTH));
+
+	const skill = new SkillInvocationMessageComponent(
+		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
+		systemMarkdown,
+		1,
+	);
+	const skillLines = skill.render(WIDTH);
+	assert.equal((plain(skillLines).join("").match(/●/g) ?? []).length, 1, "重复安装不叠加圆点");
+	assert.equal(skillLines.join("").includes("\x1b[48;"), false, "重复安装不恢复背景色");
 });
 
 finish();
