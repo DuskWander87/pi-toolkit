@@ -16,7 +16,7 @@ import {
 	getMarkdownTheme,
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import extend, {
 	SUCCESS_MARKER_COLOR,
 	installAssistantMarks,
@@ -168,7 +168,7 @@ extend({
 	},
 } as any);
 
-function assistantLines(content: unknown[], hideThinking = true, width = WIDTH): string[] {
+function assistantComponent(content: unknown[], hideThinking = true): AssistantMessageComponent {
 	return new AssistantMessageComponent(
 		{ content, stopReason: "endTurn" } as any,
 		hideThinking,
@@ -176,7 +176,11 @@ function assistantLines(content: unknown[], hideThinking = true, width = WIDTH):
 		"Thinking...",
 		1,
 		[],
-	).render(width);
+	);
+}
+
+function assistantLines(content: unknown[], hideThinking = true, width = WIDTH): string[] {
+	return assistantComponent(content, hideThinking).render(width);
 }
 
 function plain(lines: string[]): string[] {
@@ -369,6 +373,14 @@ function bashComponent(outputPad = 1): BashExecutionComponent {
 	return new BashExecutionComponent("echo hi", fakeUI, false, outputPad);
 }
 
+function skillComponent(): SkillInvocationMessageComponent {
+	return new SkillInvocationMessageComponent(
+		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
+		systemMarkdown,
+		1,
+	);
+}
+
 check("系统类组件左缘对齐到第 2 列", () => {
 	const compaction = new CompactionSummaryMessageComponent(
 		{ role: "compactionSummary", summary: "压缩前的摘要内容。", tokensBefore: 12000, timestamp: 0 } as any,
@@ -397,11 +409,7 @@ check("系统类组件左缘对齐到第 2 列", () => {
 
 check("skill 调用与工具行同一套标记栏：去背景、首行蓝圆点", () => {
 	const marker = testTheme.style("●", { fg: SUCCESS_MARKER_COLOR });
-	const skill = new SkillInvocationMessageComponent(
-		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
-		systemMarkdown,
-		1,
-	);
+	const skill = skillComponent();
 
 	const assertSkillLines = (lines: string[]): void => {
 		const joined = lines.join("\n");
@@ -465,14 +473,82 @@ check("重复安装系统组件不叠加缩进", () => {
 	);
 	assertGutterAligned(compaction.render(WIDTH));
 
-	const skill = new SkillInvocationMessageComponent(
-		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
-		systemMarkdown,
-		1,
-	);
-	const skillLines = skill.render(WIDTH);
+	const skillLines = skillComponent().render(WIDTH);
 	assert.equal((plain(skillLines).join("").match(/●/g) ?? []).length, 1, "重复安装不叠加圆点");
 	assert.equal(skillLines.join("").includes("\x1b[48;"), false, "重复安装不恢复背景色");
+});
+
+function leadingBlanks(lines: string[]): number {
+	let count = 0;
+	while (count < lines.length && isBlank(lines[count]!)) count++;
+	return count;
+}
+
+function trailingBlanks(lines: string[]): number {
+	let count = 0;
+	while (count < lines.length && isBlank(lines[lines.length - 1 - count]!)) count++;
+	return count;
+}
+
+check("块间距：跟在 Spacer 后面的块不留首行空行，其余块只留 1 行", () => {
+	// Pi 在用户消息、技能调用、压缩/分支摘要前插入 Spacer(1)，这些块不能再带首行留白。
+	for (const [id, lines] of [
+		["skill", skillComponent().render(WIDTH)],
+		["user", new UserMessageComponent("用户消息内容。", systemMarkdown, 1).render(WIDTH)],
+		[
+			"compaction",
+			new CompactionSummaryMessageComponent(
+				{ role: "compactionSummary", summary: "压缩摘要。", tokensBefore: 100, timestamp: 0 } as any,
+				systemMarkdown,
+				1,
+			).render(WIDTH),
+		],
+	] as const) {
+		assert.equal(leadingBlanks(plain(lines)), 0, `${id} 首行留白：${plain(lines).join("\n")}`);
+		assert.equal(trailingBlanks(plain(lines)), 0, `${id} 尾随空行：${plain(lines).join("\n")}`);
+	}
+
+	for (const [id, lines] of [
+		["assistant", assistantLines([{ type: "text", text: "一段话。" }])],
+		["tool", toolLines({ content: [], isError: false })],
+		["bash", bashComponent().render(WIDTH)],
+	] as const) {
+		assert.equal(leadingBlanks(plain(lines)), 1, `${id} 首行留白：${plain(lines).join("\n")}`);
+		assert.equal(trailingBlanks(plain(lines)), 0, `${id} 尾随空行：${plain(lines).join("\n")}`);
+	}
+});
+
+check("用户消息去掉留白后仍保留 OSC 133 分区标记", () => {
+	const lines = new UserMessageComponent("用户消息内容。", systemMarkdown, 1).render(WIDTH);
+	assert.ok(lines[0]!.includes("\x1b]133;A\x07"), JSON.stringify(lines[0]));
+	assert.ok(
+		lines[lines.length - 1]!.includes("\x1b]133;B\x07\x1b]133;C\x07"),
+		JSON.stringify(lines[lines.length - 1]),
+	);
+});
+
+check("助手、技能、用户相邻块之间恰好 1 行空行", () => {
+	const container = new Container();
+	// 与 Pi 的 addMessageToChat 一致：技能调用与用户消息前各有 Spacer(1)
+	container.addChild(assistantComponent([{ type: "text", text: "先前的回复。" }]));
+	container.addChild(new Spacer(1));
+	container.addChild(skillComponent());
+	container.addChild(new Spacer(1));
+	container.addChild(new UserMessageComponent("检查最近一次的提交。", systemMarkdown, 1));
+	container.addChild(assistantComponent([{ type: "text", text: "先读改动内容。" }]));
+
+	const visible = plain(container.render(WIDTH));
+	const gaps: number[] = [];
+	for (let row = 0; row < visible.length; ) {
+		if (!isBlank(visible[row]!)) {
+			row++;
+			continue;
+		}
+		const start = row;
+		while (row < visible.length && isBlank(visible[row]!)) row++;
+		if (start > 0) gaps.push(row - start);
+	}
+	assert.deepEqual(gaps, [1, 1, 1], visible.join("\n"));
 });
 
 finish();

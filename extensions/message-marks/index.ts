@@ -6,6 +6,7 @@
  * - 助手消息首个文本块首行前加 `● `，其余行（含思考块）对齐到第 2 列
  * - 工具调用首行前加 `● `（进行中与成功蓝、失败红），整块对齐到第 2 列
  * - 技能调用与工具行同一套标记栏：去掉背景色，首行前加 `● `（蓝）
+ * - 块与块之间统一留 1 行空行，不叠加 Pi 的 `Spacer(1)` 与组件自身的首尾留白
  * - 输入框首行以 `› ` 起头，多行输入在等宽空白后对齐
  *
  * Pi 未暴露普通消息的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -84,6 +85,8 @@ const OSC_SEQUENCE = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
 const CSI_SEQUENCE = /^\x1b\[[0-9;:?<=>]*[ -/]*[@-~]/;
 /** 行尾控制码，调整宽度时需保留在末尾。 */
 const TRAILING_SEQUENCE = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -/]*[@-~])+$/;
+/** 行内所有控制码（OSC / CSI），删除空行时用来把终端标记挂到相邻行。 */
+const ANY_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -/]*[@-~]/g;
 /** 背景色 SGR（`40`–`47`、`100`–`107`、`48;…`）与其复位 `49`。 */
 const BACKGROUND_SEQUENCE = /\x1b\[(?:4[0-7]|10[0-7]|48;[0-9;]*|49)m/g;
 
@@ -144,6 +147,36 @@ export function gutterLine(line: string): string {
 	if (missing <= 0) return line;
 	const start = leadingSequenceLength(line);
 	return trimTrailingSpaces(line.slice(0, start) + " ".repeat(missing) + line.slice(start), missing);
+}
+
+/**
+ * 收敛一个块的首尾空行。
+ *
+ * 块间距 = 上一块的尾随空行 + Pi 的 `Spacer(1)` + 本块的首行留白，两者叠加会出现
+ * 2–3 行空隙。这里去掉尾随空行；`leadingBlanks` 是本块应保留的首行空行数：
+ * 跟在 `Spacer(1)` 后面的块（用户消息、技能调用、压缩/分支摘要）为 0，其余为 1，
+ * 于是相邻块的间距统一为 1 行。
+ */
+export function normalizeBlockSpacing(lines: string[], leadingBlanks: 0 | 1): string[] {
+	if (lines.length === 0) return lines;
+	let firstContent = 0;
+	while (firstContent < lines.length && isBlankLine(lines[firstContent]!)) firstContent++;
+	let lastContent = lines.length - 1;
+	while (lastContent >= 0 && isBlankLine(lines[lastContent]!)) lastContent--;
+	// 整块都是空行：没有可对齐的内容，原样返回。
+	if (lastContent < 0) return lines;
+	const start = Math.max(0, firstContent - leadingBlanks);
+	const end = lastContent + 1;
+	if (start === 0 && end === lines.length) return lines;
+	const kept = lines.slice(start, end);
+	if (start > 0) kept[0] = carrySequences(lines.slice(0, start)) + kept[0];
+	if (end < lines.length) kept[kept.length - 1] = kept[kept.length - 1]! + carrySequences(lines.slice(end));
+	return kept;
+}
+
+/** 被删掉空行上的控制码（如 OSC 133 分区标记），保持原有顺序拼回相邻行。 */
+function carrySequences(lines: readonly string[]): string {
+	return lines.map((line) => line.match(ANY_SEQUENCE)?.join("") ?? "").join("");
 }
 
 interface TransformCache {
@@ -227,9 +260,12 @@ export function installUserMessagePrefix(component: typeof UserMessageComponent 
 		const lines = render.call(this, width);
 		const prefix = getSelectListTheme().description(PREFIX);
 		return cachedTransform(this, lines, `${width}\0${prefix}`, (source) =>
-			prefixFirstContentLine(
-				source.map((line) => line.replace(BACKGROUND_SEQUENCE, "")),
-				prefix,
+			normalizeBlockSpacing(
+				prefixFirstContentLine(
+					source.map((line) => line.replace(BACKGROUND_SEQUENCE, "")),
+					prefix,
+				),
+				0,
 			),
 		);
 	};
@@ -295,7 +331,7 @@ export function installAssistantMarks(component: typeof AssistantMessageComponen
 			const guttered = source.map((line) => gutterLine(line));
 			const row = firstTextRow(this, guttered);
 			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
-			return guttered;
+			return normalizeBlockSpacing(guttered, 1);
 		});
 	};
 }
@@ -307,6 +343,8 @@ interface MarkerGutterOptions {
 	marker: (component: PatchedPrototype) => string;
 	/** 渲染前剥掉背景色（Box 自己铺满的背景）。 */
 	stripBackground?: boolean;
+	/** 本块保留的首行空行数，默认 1；跟在 Pi `Spacer(1)` 后面的块传 0。 */
+	leadingBlanks?: 0 | 1;
 }
 
 /**
@@ -316,7 +354,7 @@ interface MarkerGutterOptions {
  * 否则 Pi 会因超宽行抛错。
  */
 function installMarkerGutter(component: { prototype: object }, options: MarkerGutterOptions): void {
-	const { symbol, marker: resolveMarker, stripBackground } = options;
+	const { symbol, marker: resolveMarker, stripBackground, leadingBlanks = 1 } = options;
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (this: PatchedPrototype, width: number): string[] {
@@ -329,7 +367,7 @@ function installMarkerGutter(component: { prototype: object }, options: MarkerGu
 			});
 			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
 			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
-			return guttered;
+			return normalizeBlockSpacing(guttered, leadingBlanks);
 		});
 	};
 }
@@ -347,17 +385,22 @@ export function installToolMarks(component: typeof ToolExecutionComponent = Tool
  *
  * 满宽行（如 bash 的上下边框）插入空格后会超出渲染宽度；从行尾回收不到空格时
  * 直接截回原宽度，否则 Pi 会因超宽行抛错。
+ *
+ * `leadingBlanks` 给 0 表示该组件紧跟在 Pi 的 `Spacer(1)` 后面（压缩/分支摘要）。
  */
-export function installGutter(component: { prototype: object }, symbol: symbol): void {
+export function installGutter(component: { prototype: object }, symbol: symbol, leadingBlanks: 0 | 1 = 1): void {
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (width: number): string[] {
 		const lines = render.call(this, width);
 		return cachedTransform(this, lines, `${width}\0${String(symbol.description)}`, (source) =>
-			source.map((line) => {
-				const guttered = gutterLine(line);
-				return visibleWidth(guttered) > width ? truncateToWidth(guttered, width, "") : guttered;
-			}),
+			normalizeBlockSpacing(
+				source.map((line) => {
+					const guttered = gutterLine(line);
+					return visibleWidth(guttered) > width ? truncateToWidth(guttered, width, "") : guttered;
+				}),
+				leadingBlanks,
+			),
 		);
 	};
 }
@@ -373,6 +416,7 @@ export function installSkillMark(
 		symbol: ORIGINAL_SKILL,
 		marker: () => successMarker(),
 		stripBackground: true,
+		leadingBlanks: 0,
 	});
 }
 
@@ -383,8 +427,8 @@ export function installMessageMarks(): void {
 	installToolMarks();
 	installSkillMark();
 	installGutter(BashExecutionComponent, GUTTER_BASH);
-	installGutter(CompactionSummaryMessageComponent, GUTTER_COMPACTION);
-	installGutter(BranchSummaryMessageComponent, GUTTER_BRANCH);
+	installGutter(CompactionSummaryMessageComponent, GUTTER_COMPACTION, 0);
+	installGutter(BranchSummaryMessageComponent, GUTTER_BRANCH, 0);
 	installGutter(CustomMessageComponent, GUTTER_CUSTOM);
 }
 
