@@ -74,7 +74,6 @@ interface AssistantInternals extends PatchedPrototype {
 
 /** `ToolExecutionComponent` 中判断状态用到的字段。 */
 interface ToolInternals extends PatchedPrototype {
-	isPartial?: boolean;
 	result?: { isError?: boolean };
 }
 

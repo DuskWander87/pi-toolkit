@@ -321,6 +321,8 @@ export function groupToolRuns(mode: GroupableMode): void {
 export interface ToolRunSummaryOptions {
 	/** 按发生顺序排列：助手消息、工具行/组交替出现。 */
 	items: Component[];
+	/** 区间里所有项的原始顺序（含留在摘要下方的执行中行），重扫时按它恢复调用顺序。 */
+	sequence?: readonly Component[];
 	expanded: boolean;
 	theme: () => Theme | undefined;
 	requestRender: () => void;
@@ -342,6 +344,8 @@ export class ToolRunSummary extends Container {
 	private readonly requestRender: () => void;
 	private readonly thoughtMsFor: ThoughtSource;
 	private readonly extraThought: Component | undefined;
+	/** 区间原始顺序：执行中的行不在 `children` 里，重扫要靠它把顺序还原。 */
+	private readonly itemOrder: readonly Component[];
 	private expandedState: boolean;
 	/** 收起态下改动行的位置，点击要落到行上而不是整块折起摘要。 */
 	private soloLayout: Array<{ child: Component; start: number; height: number }> = [];
@@ -352,6 +356,7 @@ export class ToolRunSummary extends Container {
 		this.requestRender = options.requestRender;
 		this.thoughtMsFor = options.thoughtMsFor ?? thoughtFromMessage;
 		this.extraThought = options.extraThought;
+		this.itemOrder = options.sequence ?? options.items;
 		this.expandedState = options.expanded;
 		for (const item of options.items) this.addChild(item);
 		// 复活已展开的摘要时，新纳入的轮次也要铺开，否则展开的时间线里夹着一行收起。
@@ -360,6 +365,11 @@ export class ToolRunSummary extends Container {
 
 	get expanded(): boolean {
 		return this.expandedState;
+	}
+
+	/** 区间里所有项的原始顺序，含留在摘要下方的执行中行。 */
+	get sequence(): readonly Component[] {
+		return this.itemOrder;
 	}
 
 	setExpanded(expanded: boolean): void {
@@ -488,12 +498,11 @@ function isRegionStart(value: unknown): boolean {
 }
 
 /**
- * 执行中的工具段：不进摘要，留在摘要下方——摘要行只有计数，看不到命令行、
+ * 执行中的工具行：不进摘要，留在摘要下方——摘要行只有计数，看不到命令行、
  * 流式输出与实时计时。并行调用里已结束的部分照常计入，执行期间最多只多出
  * 正在跑的那几行。
  */
 function isRunningSegment(item: Component): boolean {
-	if (item instanceof ToolRunGroup) return item.stats().running;
 	return isToolRow(item) && item.isPartial === true;
 }
 
@@ -549,13 +558,20 @@ export function groupSilentTurns(
 
 	const flat: Component[] = [];
 	const previous = new Map<Component, ToolRunSummary>();
+	/** 已通过摘要的原始顺序入队的项：执行中的行同时还在容器里，不能再插一次。 */
+	const sequenced = new Set<Component>();
 	for (const child of container.children) {
 		if (child instanceof ToolRunSummary) {
-			for (const item of child.children) flat.push(item);
-			const first = child.children[0];
+			// 按原始顺序展开：执行中的行在摘要下方，只展开 children 会把顺序颠倒。
+			for (const item of child.sequence) {
+				flat.push(item);
+				sequenced.add(item);
+			}
+			const first = child.sequence[0];
 			if (first) previous.set(first, child);
 			continue;
 		}
+		if (sequenced.has(child)) continue;
 		flat.push(child);
 	}
 
@@ -587,12 +603,14 @@ export function groupSilentTurns(
 				: undefined;
 		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
 		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
-		if (reused && sameItems(reused.children, absorbed)) {
+		// 区间与吸收内容都没变才复用：执行中的行刚结束时要把它纳入摘要。
+		if (reused && sameItems(reused.sequence, region.items) && sameItems(reused.children, absorbed)) {
 			next.push(reused);
 		} else {
 			next.push(
 				new ToolRunSummary({
 					items: absorbed,
+					sequence: region.items,
 					expanded: reused?.expanded ?? mode.toolOutputExpanded === true,
 					theme: () => activeTheme,
 					requestRender: () => mode.ui?.requestRender?.(),

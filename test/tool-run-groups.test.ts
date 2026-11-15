@@ -646,6 +646,140 @@ check("并行调用中先结束的调用并入摘要，仍在执行的留在下�
 	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
 });
 
+check("并行调用按发起顺序汇总，先结束的调用不改变顺序", () => {
+	const read = toolRow("read", "r1", { path: "a.ts" });
+	const bash = finish(bashRow("b1", "ls"));
+	const mode = fakeMode([assistantRow({}), read, bash]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"ran 1 shell command",
+		"先结束的调用先计入摘要",
+	);
+
+	finish(read);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(
+		plain(summary.render(WIDTH))[1]!.trimStart(),
+		"ran 1 read call, 1 shell command",
+		"摘要按发起顺序汇总",
+	);
+	assert.ok(
+		summary.children.indexOf(read) < summary.children.indexOf(bash),
+		"展开时间线保持发起顺序",
+	);
+});
+
+check("三条并行调用逆序结束时，摘要仍按发起顺序汇总", () => {
+	const read = toolRow("read", "r1", { path: "a.ts" });
+	const grep = toolRow("grep", "g1", { pattern: "x" });
+	const bash = finish(bashRow("b1", "ls"));
+	const mode = fakeMode([assistantRow({}), read, grep, bash]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"ran 1 shell command",
+		"只有已结束的调用计入摘要",
+	);
+
+	// 结束顺序与发起顺序相反：bash 已结束，接着 grep，最后 read。
+	for (const row of [grep, read]) {
+		finish(row);
+		groupToolRuns(mode);
+		groupSilentTurns(mode);
+	}
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(
+		plain(summary.render(WIDTH))[1]!.trimStart(),
+		"ran 1 read call, 1 grep call, 1 shell command",
+	);
+	assert.deepEqual(summary.children.slice(1), [read, grep, bash], "展开时间线保持发起顺序");
+});
+
+check("执行中的改动行与已完成的工具行并存", () => {
+	const bash = finish(bashRow("b1", "ls"));
+	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const mode = fakeMode([assistantRow({}), bash, edit]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(summary.children.includes(edit), false, "执行中的改动行不进摘要");
+	assert.deepEqual(mode.chatContainer.children, [summary, edit]);
+
+	finish(edit);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const rebuilt = summariesOf(mode)[0]!;
+	assert.equal(rebuilt.children.includes(edit), true);
+	assert.deepEqual(mode.chatContainer.children, [rebuilt]);
+});
+
+check("摘要之后追加的执行中行被重扫保留在摘要下方", () => {
+	const bash = finish(bashRow("b1", "ls"));
+	const mode = fakeMode([assistantRow({}), bash]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+
+	// 模拟 Pi 在 `tool_execution_start` 时把新工具行追加到容器末尾。
+	const next = toolRow("read", "r1", { path: "a.ts" });
+	mode.chatContainer.addChild(assistantRow({}));
+	mode.chatContainer.addChild(next);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const rebuilt = summariesOf(mode)[0]!;
+	assert.equal(rebuilt.children.includes(next), false, "执行中的行不进摘要");
+	assert.equal(mode.chatContainer.children.at(-1), next, "执行中的行留在摘要下方");
+	assert.equal(plain(rebuilt.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+});
+
+check("执行中切到展开后，工具结束重建仍按发起顺序且保持展开", () => {
+	const bash = finish(bashRow("b1", "ls"));
+	const read = toolRow("read", "r1", { path: "a.ts" });
+	const mode = fakeMode([assistantRow({}), bash, read]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	summariesOf(mode)[0]!.setExpanded(true);
+
+	finish(read);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summary = summariesOf(mode)[0]!;
+	assert.equal(summary.expanded, true);
+	assert.deepEqual(summary.children.slice(1), [bash, read], "按发起顺序铺开");
+});
+
+check("多个摘要并存时，执行中行留在自己的区间下方", () => {
+	const firstRun = finish(bashRow("b1", "ls"));
+	const running = bashRow("b2", "pwd");
+	const user = () => new UserMessageComponent("继续", getMarkdownTheme(), 1);
+	const mode = fakeMode([assistantRow({}), firstRun, user(), assistantRow({}), running]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const first = summariesOf(mode)[0]!;
+	assert.equal(plain(first.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(mode.chatContainer.children.at(-1), running);
+
+	finish(running);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 2, "两个请求各一行摘要");
+	assert.equal(summaries[0], first, "前一个区间未变化，实例复用");
+	assert.equal(plain(summaries[1]!.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(mode.chatContainer.children.at(-1), summaries[1], "后一个区间收成一行");
+});
+
 check("工具结束后并入同一行摘要", () => {
 	const running = bashRow("c3", "npm test");
 	const mode = fakeMode([
