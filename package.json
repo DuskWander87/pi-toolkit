@@ -5,11 +5,15 @@
 	"type": "module",
 	"description": "Pi coding agent 的终端界面扩展：工具调用折叠成一行摘要，用户与助手统一 2 列标记栏",
 	"license": "MIT",
+	"engines": {
+		"node": ">=22"
+	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/DuskWander87/pi-toolkit.git"
 	},
 	"scripts": {
-		"test": "jiti test/render.test.ts && jiti test/message-marks.test.ts && jiti test/editor-prefix.test.ts && jiti test/tool-run-groups.test.ts"
+		"test": "jiti test/render.test.ts && jiti test/message-marks.test.ts && jiti test/editor-prefix.test.ts && jiti test/tool-run-groups.test.ts && jiti test/integration.test.ts",
+		"typecheck": "npx -y -p typescript@5.9.3 tsc --noEmit"
 	}
 }

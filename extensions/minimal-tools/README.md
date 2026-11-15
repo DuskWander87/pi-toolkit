@@ -25,7 +25,7 @@
 | 工具 | 执行中 | 收起（成功） |
 |---|---|---|
 | `bash` | 命令行 + `shell · running (1.2s)` | `shell (1.5s)` |
-| `read` | 调用行 | `read 120 lines` |
+| `read` | 调用行 | `read 120 lines`；图片为 `read image` |
 | `grep` | 调用行 | `grep 3 matches` |
 | `find` | 调用行 | `found 2 files` |
 | `ls` | 调用行 | `ls . · 4 entries` |
@@ -69,11 +69,12 @@
 
 ### 表外工具
 
-未单独适配的工具会自动套用同一套两阶段渲染：
+未单独适配的工具尊重上游渲染：
 
-- 调用行取第一个非空字符串参数，截断到 40 字符
-- 结果收起为 `<工具名> · N lines`
-- 结果包含非文本内容（如图片）时交回 Pi 内置渲染，避免折叠丢内容
+- 上游提供 `renderCall` 或 `renderResult` 任一槽时，整体使用上游渲染（例如 Pi 内置的 `powershell`）
+- 两者都没有时自动套用同一套两阶段渲染：调用行取第一个非空字符串参数（截断到 40 字符），结果收起为 `<工具名> · N lines`
+- 上游只提供 `renderShell`、没有调用行 / 结果行时，仍由本扩展折叠
+- 没有上游渲染槽的工具返回图片时，摘要只统计文本行（可能显示 `0 lines`），图片由 Pi 独立渲染
 
 ### 思考标签
 
@@ -97,7 +98,7 @@
 
 ## 实现原理
 
-- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`，并用 `renderShell: "self"` 接管 7 个内置工具的渲染槽
+- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`；先查定制表，再让位给上游，两者都没有时使用通用折叠
 - 只替换渲染，不替换执行：`bash` 的 `shellPath`、`PI_*` 环境变量等仍由 Pi 内置定义处理
 - 运行中计时保存在 `context.state`，每秒调用一次 `invalidate()`，结束时清除 interval
 - diff 配色按 `theme.appearance` 在深色 / 浅色两套 RGB 底色中切换

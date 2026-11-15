@@ -10,14 +10,19 @@
 
 import type { ExtensionAPI, ToolRenderers, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { formatReadLineRange } from "@earendil-works/pi-coding-agent";
-import { Box, type Color, type Component, Text, visibleWidth } from "@earendil-works/pi-tui";
+import {
+	Box,
+	stripTerminalSequences,
+	type Color,
+	type Component,
+	Text,
+	truncateToWidth,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import { homedir } from "node:os";
 
 /** 从 `pi.registerTool` 的参数推断出的渲染函数类型。 */
 type RenderArgs = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>;
-type RenderResultArgs = Parameters<
-	NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderResult"]>
->;
 type RenderTheme = RenderArgs[1];
 type RenderContext = RenderArgs[2];
 
@@ -68,9 +73,10 @@ const MAX_INLINE_CHARS = 300;
 // ============================================================================
 
 function shortenPath(path: string): string {
-	const home = homedir();
-	if (home && path.startsWith(home)) {
-		return `~${path.slice(home.length)}`;
+	const normalized = path.replace(/\\/g, "/");
+	const home = homedir().replace(/\\/g, "/").replace(/\/+$/, "");
+	if (home && (normalized === home || normalized.startsWith(`${home}/`))) {
+		return `~${normalized.slice(home.length)}`;
 	}
 	return path;
 }
@@ -81,10 +87,16 @@ function oneLine(text: string, max = MAX_COMMAND_CHARS): string {
 	return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-function baseName(path: string): string {
-	const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-	const index = normalized.lastIndexOf("/");
-	return index === -1 ? normalized || "." : normalized.slice(index + 1) || "/";
+/** 读取工具参数中的字符串；缺失或类型不符时返回空串。 */
+function stringArg(args: unknown, key: string): string {
+	const value = (args as Record<string, unknown> | undefined)?.[key];
+	return typeof value === "string" ? value : "";
+}
+
+/** 读取工具参数中的数字；缺失或类型不符时返回 undefined。 */
+function numberArg(args: unknown, key: string): number | undefined {
+	const value = (args as Record<string, unknown> | undefined)?.[key];
+	return typeof value === "number" ? value : undefined;
 }
 
 function formatDuration(ms: number | undefined): string {
@@ -93,9 +105,14 @@ function formatDuration(ms: number | undefined): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** 去掉终端控制序列与回车，统计与展示都基于清洗后的文本。 */
+function cleanToolOutput(text: string): string {
+	return stripTerminalSequences(text).replace(/\r/g, "");
+}
+
 function firstText(result: { content: Array<{ type: string; text?: string }> }): string {
 	const block = result.content.find((c) => c.type === "text");
-	return block?.text ?? "";
+	return cleanToolOutput(block?.text ?? "");
 }
 
 function countLines(text: string): number {
@@ -108,6 +125,15 @@ const TRAILING_NOTICE = /\n\n\[[^\]\n]*\]\s*$/;
 /** 统计结果数据行数，忽略工具附加的尾部提示。 */
 function countEntries(text: string): number {
 	return countLines(text.replace(TRAILING_NOTICE, ""));
+}
+
+/** read 的行数：含空行，只剔除尾部提示与末尾换行造成的空段。 */
+function countReadLines(text: string): number {
+	const body = text.replace(TRAILING_NOTICE, "");
+	if (body === "") return 0;
+	const lines = body.split("\n");
+	while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+	return lines.length;
 }
 
 /** 把连续空行压成一个，避免展开区域出现大片留白。 */
@@ -282,7 +308,8 @@ function changedRanges(
 
 /** 解析 diff 文本，并为「单行删除 + 单行新增」配对算出词级变化区间。 */
 function buildDiffLines(lines: string[]): DiffLine[] {
-	const parsed = lines.map(parseDiffLine);
+	// 与 Pi 内置 diff 一致，tab 按 3 个空格展开，避免终端按 8 列渲染导致错位。
+	const parsed = lines.map((line) => parseDiffLine(line.replace(/\t/g, "   ")));
 	const result: DiffLine[] = [];
 	let index = 0;
 	while (index < parsed.length) {
@@ -311,20 +338,32 @@ function buildDiffLines(lines: string[]): DiffLine[] {
 
 /** diff 正文：整行铺满宽度的行级底色，变化片段再叠一层更亮的底色。 */
 class DiffLines implements Component {
+	/** 同宽度重复渲染时直接复用，避免每帧重跑颜色与截断。 */
+	private cache?: { width: number; lines: string[] };
+
 	constructor(
 		private readonly lines: DiffLine[],
 		private readonly theme: RenderTheme,
 	) {}
 
 	render(width: number): string[] {
-		return this.lines.map((line) => this.renderLine(line, width));
+		if (this.cache?.width === width) return this.cache.lines;
+		const lines = this.lines.map((line) => this.renderLine(line, width));
+		this.cache = { width, lines };
+		return lines;
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.cache = undefined;
+	}
 
 	private renderLine(line: DiffLine, width: number): string {
 		const theme = this.theme;
-		const text = line.prefix + line.content;
+		const raw = line.prefix + line.content;
+		// 一行 diff 对应一行渲染：超出宽度直接截断，背景仍铺满整行。
+		const text = visibleWidth(raw) > width ? truncateToWidth(raw, width, "") : raw;
+		const prefix = text.slice(0, Math.min(line.prefix.length, text.length));
+		const content = text.slice(prefix.length);
 		const padding = " ".repeat(Math.max(0, width - visibleWidth(text)));
 		if (line.kind === "context") {
 			return theme.fg("toolDiffContext", text + padding);
@@ -337,15 +376,17 @@ class DiffLines implements Component {
 			return theme.style(text + padding, { fg, bg });
 		}
 		const parts: string[] = [];
-		if (line.prefix) parts.push(theme.style(line.prefix, { fg, bg }));
+		if (prefix) parts.push(theme.style(prefix, { fg, bg }));
 		let cursor = 0;
 		for (const [start, end] of line.changed) {
-			const before = line.content.slice(cursor, start);
+			if (start >= content.length) break;
+			const stop = Math.min(end, content.length);
+			const before = content.slice(cursor, start);
 			if (before) parts.push(theme.style(before, { fg, bg }));
-			if (end > start) parts.push(theme.style(line.content.slice(start, end), { fg, bg: highlightBg }));
-			cursor = end;
+			if (stop > start) parts.push(theme.style(content.slice(start, stop), { fg, bg: highlightBg }));
+			cursor = stop;
 		}
-		const tail = line.content.slice(cursor) + padding;
+		const tail = content.slice(cursor) + padding;
 		if (tail) parts.push(theme.style(tail, { fg, bg }));
 		return parts.join("");
 	}
@@ -361,13 +402,10 @@ function statLine(theme: RenderTheme, text: string): Text {
 	return new Text(theme.fg("muted", `  └ ${text}`), 0, 0);
 }
 
-/** 截断提示行。 */
-function moreLinesLine(theme: RenderTheme, remaining: number): Text {
-	return new Text(
-		theme.fg("muted", `... (${remaining} more lines, ctrl+o to expand)`),
-		0,
-		0,
-	);
+/** 截断提示行，展开快捷键跟随 Pi 的 keybinding 配置。 */
+function moreLinesLine(theme: RenderTheme, remaining: number, context: RenderContext): Text {
+	const hint = context.keyHint("app.tools.expand", "to expand");
+	return new Text(theme.fg("muted", `... (${remaining} more lines, ${hint})`), 0, 0);
 }
 
 /** 摘要行：描述 + 耗时，前缀与图标等宽的空白。 */
@@ -426,7 +464,7 @@ function syncTimer(context: RenderContext, isPartial: boolean): string {
  * 展开态内容：命令与输出包在同一块背景区域内，无图标。
  */
 function blockBox(theme: RenderTheme, pad: number): Box {
-	return new Box(Math.max(pad, 1), 0, (text) => theme.bg("toolPendingBg", text));
+	return new Box(pad, 0, (text) => theme.bg("toolPendingBg", text));
 }
 
 function expandedBlock(
@@ -509,7 +547,7 @@ function renderEditResult(
 		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
 	}
 
-	const path = shortenPath(typeof context.args?.path === "string" ? context.args.path : "");
+	const path = shortenPath(stringArg(context.args, "path"));
 	const diff = result.details?.diff ?? "";
 	const box = blockBox(theme, context.outputPad);
 	box.addChild(new Text(titleLine(theme, "edit", path), 0, 0));
@@ -529,7 +567,7 @@ function renderEditResult(
 	const shown = lines.slice(0, limit);
 	box.addChild(new DiffLines(buildDiffLines(shown), theme));
 	if (shown.length < lines.length) {
-		box.addChild(moreLinesLine(theme, lines.length - shown.length));
+		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));
 	}
 	return box;
 }
@@ -552,8 +590,8 @@ function renderWriteResult(
 		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
 	}
 
-	const path = shortenPath(typeof context.args?.path === "string" ? context.args.path : "");
-	const content = typeof context.args?.content === "string" ? context.args.content : "";
+	const path = shortenPath(stringArg(context.args, "path"));
+	const content = stringArg(context.args, "content");
 	const lines = trimTrailingEmpty(content.split("\n"));
 
 	const box = blockBox(theme, context.outputPad);
@@ -566,7 +604,7 @@ function renderWriteResult(
 		box.addChild(new DiffLines(shown, theme));
 	}
 	if (shown.length < lines.length) {
-		box.addChild(moreLinesLine(theme, lines.length - shown.length));
+		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));
 	}
 	return box;
 }
@@ -587,16 +625,11 @@ function argsSummary(args: unknown): string {
 	return "";
 }
 
-/** 结果含非文本片段（如图片）时，交回 Pi 内置渲染，避免折叠丢内容。 */
-function hasRichContent(result: { content: Array<{ type: string }> }): boolean {
-	return result.content.some((part) => part.type !== "text");
-}
-
 /**
  * 表外工具的兜底渲染：与内置工具同一套两阶段策略。
  * 新增工具无需改动本扩展即可获得折叠显示。
  */
-function genericRenderers(toolName: string, base: ToolRenderers | undefined): ToolRenderers {
+function genericRenderers(toolName: string): ToolRenderers {
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
@@ -609,9 +642,6 @@ function genericRenderers(toolName: string, base: ToolRenderers | undefined): To
 			return new Text(`${title}${detail}`, context.outputPad, 0);
 		},
 		renderResult(result, options, theme, context) {
-			if (base?.renderResult && hasRichContent(result)) {
-				return base.renderResult(result, options, theme, context);
-			}
 			const summary = argsSummary(context.args);
 			return renderResultText(
 				result,
@@ -636,7 +666,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	bash: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			const command = typeof args?.command === "string" ? args.command : "";
+			const command = stringArg(args, "command");
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
@@ -654,7 +684,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 				context,
 				() => "shell",
 				"shell",
-				`$ ${oneLine(typeof context.args?.command === "string" ? context.args.command : "") || "..."}`,
+				`$ ${oneLine(stringArg(context.args, "command")) || "..."}`,
 			);
 		},
 	},
@@ -666,8 +696,8 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
-			const range = formatReadLineRange(args?.offset, args?.limit);
+			const path = shortenPath(stringArg(args, "path"));
+			const range = formatReadLineRange(numberArg(args, "offset"), numberArg(args, "limit"));
 			const suffix = range ? theme.fg("warning", range) : "";
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", path || "...")}${suffix}`,
@@ -676,14 +706,15 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			);
 		},
 		renderResult(result, options, theme, context) {
+			const hasImage = result.content.some((part) => part.type === "image");
 			return renderResultText(
 				result,
 				options,
 				theme,
 				context,
-				(output) => `read ${plural(countLines(output), "line")}`,
+				(output) => (hasImage ? "read image" : `read ${plural(countReadLines(output), "line")}`),
 				"read",
-				`read ${shortenPath(typeof context.args?.path === "string" ? context.args.path : "")}${formatReadLineRange(context.args?.offset, context.args?.limit) ?? ""}`,
+				`read ${shortenPath(stringArg(context.args, "path"))}${formatReadLineRange(numberArg(context.args, "offset"), numberArg(context.args, "limit")) ?? ""}`,
 			);
 		},
 	},
@@ -695,7 +726,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
+			const path = shortenPath(stringArg(args, "path"));
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", path || "...")}`,
 				context.outputPad,
@@ -714,7 +745,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const path = shortenPath(typeof args?.path === "string" ? args.path : "");
+			const path = shortenPath(stringArg(args, "path"));
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", path || "...")}`,
 				context.outputPad,
@@ -733,7 +764,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const pattern = typeof args?.pattern === "string" ? args.pattern : "";
+			const pattern = stringArg(args, "pattern");
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("grep"))} ${theme.fg("accent", `/${oneLine(pattern, 40)}/`)}`,
 				context.outputPad,
@@ -748,7 +779,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 				context,
 				(output) => `grep ${plural(countEntries(output), "match", "matches")}`,
 				"grep",
-				`grep /${oneLine(typeof context.args?.pattern === "string" ? context.args.pattern : "", 40)}/`,
+				`grep /${oneLine(stringArg(context.args, "pattern"), 40)}/`,
 			);
 		},
 	},
@@ -760,7 +791,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const pattern = typeof args?.pattern === "string" ? args.pattern : "";
+			const pattern = stringArg(args, "pattern");
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("find"))} ${theme.fg("accent", oneLine(pattern, 40))}`,
 				context.outputPad,
@@ -775,7 +806,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 				context,
 				(output) => `found ${plural(countEntries(output), "file")}`,
 				"find",
-				`find ${oneLine(typeof context.args?.pattern === "string" ? context.args.pattern : "", 40)}`,
+				`find ${oneLine(stringArg(context.args, "pattern"), 40)}`,
 			);
 		},
 	},
@@ -787,7 +818,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			if (!prepareCall(context)) {
 				return new Text("", context.outputPad, 0);
 			}
-			const path = shortenPath(typeof args?.path === "string" ? args.path : ".");
+			const path = shortenPath(stringArg(args, "path") || ".");
 			return new Text(
 				`${theme.fg("toolTitle", theme.bold("ls"))} ${theme.fg("accent", path || ".")}`,
 				context.outputPad,
@@ -795,7 +826,7 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 			);
 		},
 		renderResult(result, options, theme, context) {
-			const path = shortenPath(typeof context.args?.path === "string" ? context.args.path : ".");
+			const path = shortenPath(stringArg(context.args, "path") || ".");
 			return renderResultText(
 				result,
 				options,
@@ -823,9 +854,12 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setHiddenThinkingLabel(`\x1b[0m${thinkingFg}Thinking...`);
 	});
 
-	// 表内工具用定制渲染；表外工具自动套用同一套两阶段折叠。
+	// 先看定制表；表外工具尊重上游：任一渲染槽存在时整体让位，两者都没有才折叠。
 	pi.registerToolRenderer((toolName, next) => {
-		const custom = CUSTOM_RENDERERS[toolName];
-		return custom ?? genericRenderers(toolName, next());
+		const custom = CUSTOM_RENDERERS[toolName] as ToolRenderers | undefined;
+		if (custom) return custom;
+		const upstream = next();
+		if (upstream?.renderCall || upstream?.renderResult) return upstream;
+		return genericRenderers(toolName);
 	});
 }

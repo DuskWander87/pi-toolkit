@@ -34,10 +34,15 @@ import {
 	truncateToWidth,
 	type Component,
 	type TuiMouseEvent,
-	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 
-const PATCHED = Symbol.for("pi-toolkit.tool-run-groups");
+/** 与 `Container.handleMouse` 的返回类型保持一致（该类型未从包入口导出）。 */
+type MouseDispatchResult = NonNullable<ReturnType<Container["handleMouse"]>>;
+
+/** 原型上保存的原始方法：`/reload` 重新安装时新 wrapper 仍调用它，不叠加。 */
+const ORIGINAL_HANDLE_EVENT = Symbol.for("pi-toolkit.tool-run-groups.handle-event");
+const ORIGINAL_RENDER_SESSION_ITEMS = Symbol.for("pi-toolkit.tool-run-groups.render-session-items");
+const ORIGINAL_UPDATE_THINKING = Symbol.for("pi-toolkit.tool-run-groups.update-thinking-visibility");
 /** 摘要行缩进量，与 message-marks 的标记栏同宽，使正文从同一列开始。 */
 const GUTTER = 2;
 /** 改动类工具必须逐条可见。 */
@@ -53,7 +58,6 @@ let activeTheme: Theme | undefined;
 /** 工具行暴露的内部状态，只读取。 */
 interface ToolRow extends Component {
 	toolName?: string;
-	toolCallId?: string;
 	isPartial?: boolean;
 	result?: { isError?: boolean };
 	setExpanded?(expanded: boolean): void;
@@ -65,6 +69,7 @@ interface AssistantInternals extends Component {
 	lastMessage?: { stopReason?: string };
 	hiddenThinkingLabel?: string;
 	setHiddenThinkingLabel?(label: string): void;
+	setHideThinkingBlock?(hide: boolean): void;
 }
 
 /** 聚合所需的最小 `InteractiveMode` 内部结构。 */
@@ -74,12 +79,14 @@ interface GroupableMode {
 	ui?: { requestRender?: () => void };
 	handleEvent?: (event: unknown) => Promise<void>;
 	renderSessionItems?: (...args: unknown[]) => unknown;
+	/** Pi 1.5.2 的该方法不接收参数，开关状态在 `hideThinkingBlock` 上。 */
+	updateThinkingBlockVisibility?: () => void;
+	hideThinkingBlock?: boolean;
 }
 
 export interface ToolRunGroupOptions {
 	rows: ToolRow[];
 	toolNames: readonly string[];
-	thoughtMs?: number;
 	expanded: boolean;
 	theme: () => Theme | undefined;
 	requestRender: () => void;
@@ -177,7 +184,7 @@ export function isSilentTurn(value: unknown): boolean {
  */
 function isFoldableAssistant(value: unknown): boolean {
 	if (!(value instanceof AssistantMessageComponent)) return false;
-	const stopReason = (value as AssistantInternals).lastMessage?.stopReason;
+	const stopReason = (value as unknown as AssistantInternals).lastMessage?.stopReason;
 	return stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length";
 }
 
@@ -189,7 +196,6 @@ function isFoldableAssistant(value: unknown): boolean {
  */
 export class ToolRunGroup extends Container {
 	private readonly names: readonly string[];
-	private readonly thoughtMs: number | undefined;
 	private readonly themeSource: () => Theme | undefined;
 	private readonly requestRender: () => void;
 	private expandedState: boolean;
@@ -197,7 +203,6 @@ export class ToolRunGroup extends Container {
 	constructor(options: ToolRunGroupOptions) {
 		super();
 		this.names = options.toolNames;
-		this.thoughtMs = options.thoughtMs;
 		this.themeSource = options.theme;
 		this.requestRender = options.requestRender;
 		this.expandedState = options.expanded;
@@ -237,7 +242,7 @@ export class ToolRunGroup extends Container {
 		return this.expandedState ? ["", summary, ...super.render(width)] : ["", summary];
 	}
 
-	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+	handleMouse(event: TuiMouseEvent): MouseDispatchResult | undefined {
 		// 收起时整块可点；展开时只有摘要行负责折叠，其余行交给工具行自己处理。
 		if (
 			event.type === "click" &&
@@ -246,7 +251,7 @@ export class ToolRunGroup extends Container {
 		) {
 			this.setExpanded(!this.expandedState);
 			this.requestRender();
-			return { handled: true };
+			return { handled: true } as MouseDispatchResult;
 		}
 		if (!this.expandedState) return undefined;
 		return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
@@ -257,11 +262,12 @@ export class ToolRunGroup extends Container {
 	}
 
 	private summaryLine(width: number): string {
-		const { running, failed } = this.stats();
-		const text = running
-			? `Running ${summarize(this.names)}…`
-			: describeRun(this.names, this.thoughtMs);
-		return styledSummaryLine(text, failed, width, this.themeSource());
+		return styledSummaryLine(
+			describeRun(this.names),
+			this.stats().failed,
+			width,
+			this.themeSource(),
+		);
 	}
 }
 
@@ -269,21 +275,15 @@ export class ToolRunGroup extends Container {
  * 把 `chatContainer` 里相邻的工具行合并成 `ToolRunGroup`。
  *
  * 幂等：已成组的部分不是 `ToolExecutionComponent`，再次调用不会重复包装。
- * `ids` 为刚结束那条助手消息的工具调用 id；全部命中时才把 `thoughtMs` 计入摘要，
- * 避免历史回放或跨消息合并时显示错误的思考耗时。
+ * 执行中的工具段保留原行，结束后由 `tool_execution_end` 触发重新扫描。
  */
-export function groupToolRuns(
-	mode: GroupableMode,
-	options: { ids?: ReadonlySet<string>; thoughtMs?: number } = {},
-): void {
+export function groupToolRuns(mode: GroupableMode): void {
 	const container = mode.chatContainer;
 	if (!container || !Array.isArray(container.children)) return;
 
 	const children = container.children as unknown[];
 	const next: Component[] = [];
 	let grouped = false;
-	// 同一条消息被拆成多段时，思考耗时只计在第一段，避免重复显示。
-	let thoughtAssigned = false;
 
 	for (let index = 0; index < children.length; index++) {
 		const row = children[index];
@@ -302,18 +302,10 @@ export function groupToolRuns(
 			continue;
 		}
 
-		const ids = options.ids;
-		// 只要每个调用都属于这条消息就计入耗时：同一消息可能被非工具行切成多段。
-		const belongsToMessage =
-			!thoughtAssigned &&
-			ids !== undefined &&
-			run.every((item) => ids.has(String(item.toolCallId)));
-		if (belongsToMessage) thoughtAssigned = true;
 		next.push(
 			new ToolRunGroup({
 				rows: run,
 				toolNames,
-				thoughtMs: belongsToMessage ? options.thoughtMs : undefined,
 				expanded: mode.toolOutputExpanded === true,
 				theme: () => activeTheme,
 				requestRender: () => mode.ui?.requestRender?.(),
@@ -389,6 +381,8 @@ export class ToolRunSummary extends Container {
 		let top = 2; // 空行 + 摘要行
 		for (const child of this.children) {
 			if (isToolSegment(child) && !isSoloRow(child)) continue;
+			// 静默轮次收起时不占行（D1）；展开后仍在时间线里看到思考正文。
+			if (child instanceof AssistantMessageComponent && isSilentTurn(child)) continue;
 			const lines = child.render(width);
 			layout.push({ child, start: top, height: lines.length });
 			top += lines.length;
@@ -398,7 +392,7 @@ export class ToolRunSummary extends Container {
 		return ["", summary, ...body];
 	}
 
-	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+	handleMouse(event: TuiMouseEvent): MouseDispatchResult | undefined {
 		if (event.type === "click" && event.button === "left") {
 			if (this.expandedState) {
 				// 展开时只有摘要行负责折叠，其余行交给子组件。
@@ -410,13 +404,13 @@ export class ToolRunSummary extends Container {
 				for (const { child, start, height } of this.soloLayout) {
 					if (event.y < start || event.y >= start + height) continue;
 					const result = child.handleMouse?.({ ...event, y: event.y - start, height });
-					if (result) return result;
+					if (result) return result as MouseDispatchResult;
 					break;
 				}
 			}
 			this.setExpanded(!this.expandedState);
 			this.requestRender();
-			return { handled: true };
+			return { handled: true } as MouseDispatchResult;
 		}
 		if (!this.expandedState) return undefined;
 		return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
@@ -425,28 +419,22 @@ export class ToolRunSummary extends Container {
 	private summaryLine(width: number): string {
 		const names: string[] = [];
 		let thoughtMs = 0;
-		let running = false;
 		let failed = 0;
 		for (const child of this.children) {
 			if (child instanceof ToolRunGroup) {
 				names.push(...child.toolNames);
-				const state = child.stats();
-				running ||= state.running;
-				failed += state.failed;
+				failed += child.stats().failed;
 			} else if (isToolRow(child)) {
 				// edit / write 自己逐条渲染，不重复计入摘要行。
 				if (isSoloRow(child)) continue;
 				names.push(String(child.toolName));
-				if (child.isPartial) running = true;
 				if (child.result?.isError) failed++;
 			} else if (child instanceof AssistantMessageComponent) {
 				thoughtMs += this.thoughtMsFor(child) ?? 0;
 			}
 		}
 		if (this.extraThought) thoughtMs += this.thoughtMsFor(this.extraThought) ?? 0;
-		const text = running
-			? `Running ${summarize(names)}…`
-			: describeRun(names, thoughtMs > 0 ? thoughtMs : undefined);
+		const text = describeRun(names, thoughtMs > 0 ? thoughtMs : undefined);
 		return styledSummaryLine(text, failed, width, this.themeSource());
 	}
 }
@@ -583,9 +571,13 @@ export function groupSilentTurns(
 
 		const items = region.items;
 		const reused = previous.get(flat[index]!);
-		// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要。
+		// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要；
+		// 报错 / 中断的轮次是硬边界，保留自己的耗时标签。
 		const preceding = flat[index - 1];
-		const extraThought = preceding instanceof AssistantMessageComponent ? preceding : undefined;
+		const extraThought =
+			preceding instanceof AssistantMessageComponent && isFoldableAssistant(preceding)
+				? preceding
+				: undefined;
 		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
 		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
 		if (reused && sameItems(reused.children, items)) {
@@ -611,6 +603,30 @@ export function groupSilentTurns(
 	if (!sameItems(next, container.children)) container.children = next;
 }
 
+/**
+ * 把思考可见性同步到折叠内的助手消息。
+ *
+ * Pi 的顶层遍历只覆盖 `chatContainer` 的直接子组件，被收进摘要的轮次收不到更新；
+ * 这里只进入摘要与工具组，其他容器不动。
+ */
+export function applyThinkingVisibility(root: Component, hidden: boolean): void {
+	if (root instanceof AssistantMessageComponent) {
+		(root as unknown as AssistantInternals).setHideThinkingBlock?.(hidden);
+		return;
+	}
+	if (root instanceof ToolRunSummary || root instanceof ToolRunGroup) {
+		for (const child of root.children) applyThinkingVisibility(child, hidden);
+		return;
+	}
+	if (root instanceof Container) {
+		for (const child of root.children) {
+			if (child instanceof ToolRunSummary || child instanceof ToolRunGroup) {
+				applyThinkingVisibility(child, hidden);
+			}
+		}
+	}
+}
+
 /** 累计当前流式消息里的思考字符数，用于判断思考是否仍在继续。 */
 interface ThinkingClock {
 	startedAt: number;
@@ -629,7 +645,7 @@ function thinkingLength(message: { content?: Array<{ type?: string; thinking?: s
 	return total;
 }
 
-function trackThinking(event: unknown): void {
+export function trackThinking(event: unknown): void {
 	const { type, message } = event as {
 		type?: string;
 		message?: { role?: string; content?: Array<{ type?: string; thinking?: string }> };
@@ -647,7 +663,7 @@ function trackThinking(event: unknown): void {
 	clock.sawThinking = true;
 }
 
-function finishMessage(mode: GroupableMode, event: unknown): void {
+export function finishMessage(mode: GroupableMode, event: unknown): void {
 	const { type, message } = event as {
 		type?: string;
 		message?: {
@@ -666,16 +682,13 @@ function finishMessage(mode: GroupableMode, event: unknown): void {
 	const hasThinking = (message.content ?? []).some((part) => part?.type === "thinking");
 	if (assistant && hasThinking && thoughtMs !== undefined) applyThoughtLabel(assistant, thoughtMs);
 
-	const ids = new Set<string>();
-	for (const part of message.content ?? []) {
-		if (part?.type === "toolCall" && typeof part.id === "string") ids.add(part.id);
-	}
 	// 失败或中断时保留逐条可见，便于判断是哪一次调用出的问题。
-	if (ids.size === 0 || message.stopReason === "error" || message.stopReason === "aborted") return;
+	if (message.stopReason === "error" || message.stopReason === "aborted") return;
 
 	if (assistant && thoughtMs !== undefined) thoughtByMessage.set(assistant, thoughtMs);
 
-	groupToolRuns(mode, { ids, thoughtMs });
+	// 纯文本回复也要重扫：它可能紧跟在已折叠的请求后面，需要并入同一行摘要。
+	groupToolRuns(mode);
 	groupSilentTurns(mode);
 	mode.ui?.requestRender?.();
 }
@@ -697,15 +710,23 @@ export function refreshToolRuns(mode: GroupableMode): void {
 	mode.ui?.requestRender?.();
 }
 
-/** 接管 `InteractiveMode` 的事件分发与历史回放，重复加载不会叠加。 */
+/**
+ * 接管 `InteractiveMode` 的事件分发与历史回放。
+ *
+ * 原始方法只在首次安装时保存；重复安装（含同进程 `/reload`）用新 wrapper
+ * 覆盖旧 wrapper，总是调用同一份原始实现，因此不会叠加。
+ */
 export function installToolRunGroups(): boolean {
 	const prototype = InteractiveMode.prototype as unknown as Record<PropertyKey, unknown> & GroupableMode;
-	if (prototype[PATCHED]) return true;
+	if (typeof prototype.handleEvent !== "function" || typeof prototype.renderSessionItems !== "function") {
+		return false;
+	}
 
-	const handleEvent = prototype.handleEvent;
-	const renderSessionItems = prototype.renderSessionItems;
-	if (typeof handleEvent !== "function" || typeof renderSessionItems !== "function") return false;
-	prototype[PATCHED] = true;
+	const handleEvent = (prototype[ORIGINAL_HANDLE_EVENT] ??= prototype.handleEvent) as NonNullable<
+		GroupableMode["handleEvent"]
+	>;
+	const renderSessionItems = (prototype[ORIGINAL_RENDER_SESSION_ITEMS] ??=
+		prototype.renderSessionItems) as NonNullable<GroupableMode["renderSessionItems"]>;
 
 	prototype.handleEvent = async function (this: GroupableMode, event: unknown) {
 		trackThinking(event);
@@ -720,6 +741,19 @@ export function installToolRunGroups(): boolean {
 		refreshToolRuns(this);
 		return result;
 	};
+
+	// 折叠内的消息收不到 Pi 的顶层遍历，这里补一次；方法缺失时保持原行为。
+	const updateThinkingVisibility = (prototype[ORIGINAL_UPDATE_THINKING] ??= prototype
+		.updateThinkingBlockVisibility) as GroupableMode["updateThinkingBlockVisibility"];
+	if (typeof updateThinkingVisibility === "function") {
+		prototype.updateThinkingBlockVisibility = function (this: GroupableMode) {
+			updateThinkingVisibility.call(this);
+			// Pi 调用时不传参数，真实开关在实例字段上；读参数会把 `undefined` 写进嵌套消息。
+			if (this.chatContainer) {
+				applyThinkingVisibility(this.chatContainer, this.hideThinkingBlock === true);
+			}
+		};
+	}
 
 	return true;
 }

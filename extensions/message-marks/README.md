@@ -1,6 +1,6 @@
 # message-marks
 
-2 列标记栏：用户消息与输入框用 `›`，助手文本块与工具调用用 `●`，其余内容统一从第 2 列开始。
+2 列标记栏：用户消息与输入框用 `›`，助手文本块与工具调用用 `●`；系统类消息（`!` 命令、压缩/分支摘要、自定义消息、技能调用）只缩进到第 2 列，不加圆点。
 
 ## 效果
 
@@ -29,12 +29,14 @@
 | 工具调用首行：进行中 | `●` | 同上（灰） |
 | 工具调用首行：成功 | `●` | 固定蓝 `rgb(86,156,214)` |
 | 工具调用首行：失败 | `●` | 主题 `error`（红） |
+| `!` 命令、压缩/分支摘要、自定义消息、技能调用 | 无（只缩进） | — |
 
 ## 对齐方式
 
 - 标记栏固定 2 列：第 1 列放标记，第 2 列为空格
 - 助手消息与工具块的每一行都补到第 2 列；首行用标记替换原有的两格留白
 - 用户消息只在首个内容行插入前缀，后续行补等量空格，使内容从同一列开始
+- 系统类组件每行补到第 2 列；原本就满宽的边框或自定义输出会截回原宽度
 - 插入空格后从行尾回收等量空格，整行可见宽度不变
 - 代码块、列表等已有缩进保持相对结构；终端图片行（Kitty / iTerm2 协议）不参与缩进与标记
 
@@ -55,6 +57,14 @@
 - 整块对齐到第 2 列，首行加状态圆点
 - 圆点颜色随执行状态变化：进行中灰、成功蓝、失败红
 - 工具结果的正文、diff 与截断提示都在标记栏右侧
+
+### 系统类消息
+
+`!` 命令、compaction / branch summary、custom message、skill invocation 只对齐左缘：
+
+- 不加圆点，不剥离原有的背景色
+- 满宽边框（如 bash 执行框的上下边框）与 `customRenderer` 的满宽输出在插入缩进后截回原宽度，右侧最多丢 2 列
+- 终端图片行保持原样，不参与缩进
 
 ### 输入框
 
@@ -89,9 +99,10 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 - `UserMessageComponent.render`：去背景色 + 首行前缀
 - `AssistantMessageComponent.render`：整条消息对齐 + 首个文本块圆点
 - `ToolExecutionComponent.render`：整块对齐 + 状态圆点
+- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`、`SkillInvocationMessageComponent`：统一补缩进，满宽行截回原宽度
 - `ctx.ui.setEditorComponent`：注册 `PromptPrefixEditor`
 
-安装用 `Symbol.for` 标记，重复加载不会叠加。主题代理在 `session_start` 取得，切换主题后工具圆点颜色仍跟随。
+安装时把原始 `render` 保存在 `Symbol.for` 键上，重复安装（含同进程 `/reload`）用新 wrapper 覆盖旧的，不会叠加；从没有保存原始方法的旧版本第一次升级后需要重启一次 Pi，之后 `/reload` 即可。渲染结果按组件缓存，内容未变时省去逐行正则与宽度计算。主题代理在 `session_start` 取得，切换主题后工具圆点颜色仍跟随。
 
 ## 限制
 
@@ -100,11 +111,13 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 - **成功蓝是固定 RGB**：主题没有蓝色令牌，无法随自定义主题变化
 - **只标第一个文本块**：一条助手消息中的后续文本块不加圆点
 - **图片行不缩进**：终端图片自带单元格定位，保持原样
+- **满宽内容可能被截断**：系统类组件的满宽边框或 `customRenderer` 输出右侧会丢最多 2 列
+- **代码块相对缩进少 1 列**：正文移到第 2 列后，块内相对缩进比原来少 1 列
 - **输入框可能被覆盖**：其他扩展后注册编辑器时会失效，见「与其他扩展」
 
 ## 测试
 
-`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../README.md#测试)。
+`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../README.md#测试)。
 
 ---
 

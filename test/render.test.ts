@@ -4,8 +4,11 @@
  * 运行：npm test
  */
 import assert from "node:assert";
+import { homedir } from "node:os";
 import chalk from "chalk";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import extend from "../extensions/minimal-tools/index.ts";
+import { check, finish } from "./harness.ts";
 
 const usedColors = new Set<string>();
 const theme = {
@@ -71,6 +74,7 @@ function ctx(overrides: Record<string, unknown> = {}) {
 		isError: false,
 		durationMs: 163,
 		outputPad: PAD,
+		keyHint: (key: string, description: string) => `ctrl+o ${description}`,
 		...overrides,
 	};
 }
@@ -89,16 +93,6 @@ function dedent(value: string): string {
 		.split("\n")
 		.map((line) => line.replace(/^\s+/, ""))
 		.join("\n");
-}
-
-const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
-function check(name: string, fn: () => void) {
-	try {
-		fn();
-		results.push({ name, ok: true });
-	} catch (error) {
-		results.push({ name, ok: false, detail: (error as Error).message });
-	}
 }
 
 /** 把行首缩进量单独输出，便于人工核对对齐。 */
@@ -224,6 +218,22 @@ check("各工具收起摘要文案", () => {
 	}
 });
 
+check("read 截断与空行按数据行计数", () => {
+	const r = renderers("read");
+	const cases: Array<[string, string]> = [
+		["l1\nl2\nl3\n\n[120 more lines...]", "read 3 lines (163ms)"],
+		["a\n\nb", "read 3 lines (163ms)"],
+		["l1\nl2", "read 2 lines (163ms)"],
+		["l1\nl2\n", "read 2 lines (163ms)"],
+	];
+	for (const [output, expected] of cases) {
+		const got = dedent(
+			text(r.renderResult({ content: [{ type: "text", text: output }] }, { expanded: false, isPartial: false }, theme, ctx())),
+		);
+		assert.equal(got, expected, JSON.stringify(output));
+	}
+});
+
 // ---------------------------------------------------------------- 8. 尾部提示行
 check("尾部上限/截断提示行不计入条目数", () => {
 	const cases: Array<[string, string, string]> = [
@@ -239,38 +249,71 @@ check("尾部上限/截断提示行不计入条目数", () => {
 });
 
 // ---------------------------------------------------------------- 9. 表外工具
-check("表外工具（powershell）套用折叠渲染", () => {
-	const generic = renderers("powershell");
+check("表外工具无上游渲染时套用折叠", () => {
+	const generic = renderers("weird-tool");
 	const running = ctx({ isPartial: true, durationMs: undefined, state: { startedAt: Date.now() - 1200 }, args: { script: "Get-Process" } });
-	assert.equal(dedent(text(generic.renderCall({ script: "Get-Process" }, theme, running))), "powershell Get-Process");
+	assert.equal(dedent(text(generic.renderCall({ script: "Get-Process" }, theme, running))), "weird-tool Get-Process");
 	assert.match(
 		dedent(text(generic.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running))),
-		/^powershell · running \(1\.[2-3]s\)$/,
+		/^weird-tool · running \(1\.[2-3]s\)$/,
 	);
 	const done = ctx({ args: { script: "Get-Process" }, durationMs: 1200 });
 	assert.equal(
 		dedent(text(generic.renderResult({ content: [{ type: "text", text: "p1\np2" }] }, { expanded: false, isPartial: false }, theme, done))),
-		"powershell · 2 lines (1.2s)",
+		"weird-tool · 2 lines (1.2s)",
 	);
 });
 
-// ---------------------------------------------------------------- 10. 富内容回退
-check("表外工具含图片时回交内置渲染", () => {
-	const base = {
-		renderResult: () => ({
-			render: () => ["BASE_RENDER"],
-			invalidate() {},
-		}),
-	};
-	const generic = renderers("weird-tool", base);
+// ---------------------------------------------------------------- 10. 上游让位
+const UPSTREAM = {
+	renderCall: () => ({ render: () => ["UPSTREAM_CALL"], invalidate() {} }),
+	renderResult: () => ({ render: () => ["UPSTREAM_RESULT"], invalidate() {} }),
+};
+
+check("上游提供任一渲染槽时整体让位", () => {
+	assert.equal(renderers("powershell", UPSTREAM), UPSTREAM);
+	const onlyCall = { renderCall: UPSTREAM.renderCall };
+	assert.equal(renderers("powershell", onlyCall), onlyCall);
+	const onlyResult = { renderResult: UPSTREAM.renderResult };
+	assert.equal(renderers("powershell", onlyResult), onlyResult);
+	const image = renderers("powershell", onlyResult);
 	assert.equal(
-		text(generic.renderResult({ content: [{ type: "image", data: "x", mimeType: "image/png" }] }, { expanded: false, isPartial: false }, theme, ctx())),
-		"BASE_RENDER",
+		text(image.renderResult({ content: [{ type: "image", data: "x", mimeType: "image/png" }] }, { expanded: false, isPartial: false }, theme, ctx())),
+		"UPSTREAM_RESULT",
+	);
+});
+
+check("上游没有渲染槽时仍用折叠", () => {
+	const generic = renderers("weird-tool", {});
+	assert.equal(
+		dedent(text(generic.renderResult({ content: [{ type: "text", text: "a\nb" }] }, { expanded: false, isPartial: false }, theme, ctx()))),
+		"weird-tool · 2 lines (163ms)",
+	);
+	// next() 返回 undefined 时同样退化到折叠。
+	assert.equal(
+		dedent(text(renderers("another-tool").renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, ctx()))),
+		"another-tool · 0 lines (163ms)",
+	);
+});
+
+check("定制表优先于上游渲染", () => {
+	for (const name of ["bash", "read"]) {
+		const custom = renderers(name, UPSTREAM);
+		assert.notEqual(custom, UPSTREAM);
+		assert.equal(typeof custom.renderResult, "function");
+	}
+});
+
+check("无上游渲染槽的图片结果由 Pi 独立渲染", () => {
+	const generic = renderers("image-tool");
+	assert.equal(
+		dedent(text(generic.renderResult({ content: [{ type: "image", data: "x", mimeType: "image/png" }] }, { expanded: false, isPartial: false }, theme, ctx()))),
+		"image-tool · 0 lines (163ms)",
 	);
 });
 
 // ---------------------------------------------------------------- 11. read 图片
-check("read 读取图片时摘要可用（图片由 Pi 独立渲染）", () => {
+check("read 读取图片时摘要显示 read image", () => {
 	const r = renderers("read");
 	assert.equal(
 		dedent(
@@ -283,7 +326,21 @@ check("read 读取图片时摘要可用（图片由 Pi 独立渲染）", () => {
 				),
 			),
 		),
-		"read 1 line (163ms)",
+		"read image (163ms)",
+	);
+	// 图片块与多行文本共存时仍按图片处理。
+	assert.equal(
+		dedent(
+			text(
+				r.renderResult(
+					{ content: [{ type: "text", text: "a\nb\nc" }, { type: "image", data: "x", mimeType: "image/png" }] },
+					{ expanded: false, isPartial: false },
+					theme,
+					ctx({ args: { path: "a.png" } }),
+				),
+			),
+		),
+		"read image (163ms)",
 	);
 });
 
@@ -315,6 +372,122 @@ check("edit 展示 diff：统计 + 超过 30 行截断提示", () => {
 	assert.ok(out.startsWith("edit C:/tmp/a.ts"), out);
 	assert.ok(out.includes("└ Added 41 lines, removed 1 line"), out);
 	assert.ok(out.includes("more lines, ctrl+o to expand"), out);
+});
+
+check("展开提示使用 keybinding 配置", () => {
+	const edit = renderers("edit");
+	const diff = Array.from({ length: 35 }, (_, i) => `+${i + 1} line`).join("\n");
+	const out = dedent(
+		text(
+			edit.renderResult(
+				{ content: [{ type: "text", text: "ok" }], details: { diff } },
+				{ expanded: false, isPartial: false },
+				theme,
+				ctx({ args: { path: "a.ts" }, keyHint: (_key: string, description: string) => `ctrl+shift+o ${description}` }),
+			),
+		),
+	);
+	assert.ok(out.includes("ctrl+shift+o to expand"), out);
+});
+
+check("diff 组件同宽度重复渲染结果一致", () => {
+	const edit = renderers("edit");
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff: "-1 old\n+1 new" } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	assert.deepEqual(component.render(40), component.render(40));
+});
+
+check("工具输出清洗 ANSI 与回车", () => {
+	const r = renderers("bash");
+	const out = text(
+		r.renderResult(
+			{ content: [{ type: "text", text: "\x1b[31mboom\x1b[0m\r\nnext" }] },
+			{ expanded: true, isPartial: false },
+			theme,
+			ctx({ expanded: true, args: { command: "false" } }),
+		),
+	);
+	assert.equal(out.includes("\x1b[31m"), false, JSON.stringify(out));
+	assert.equal(out.includes("\r"), false, JSON.stringify(out));
+	assert.ok(out.includes("boom"), JSON.stringify(out));
+	assert.ok(out.includes("next"), JSON.stringify(out));
+});
+
+check("outputPad=0 时展开块不额外缩进", () => {
+	const r = renderers("bash");
+	const lines = r
+		.renderResult(
+			{ content: [{ type: "text", text: "x" }] },
+			{ expanded: true, isPartial: false },
+			theme,
+			ctx({ expanded: true, outputPad: 0, durationMs: 90, args: { command: "ls" } }),
+		)
+		.render(40)
+		.map(stripTerminalSequences);
+	assert.ok(lines[0]!.startsWith("$ ls"), JSON.stringify(lines[0]));
+});
+
+check("diff 长行截断到渲染宽度", () => {
+	const edit = renderers("edit");
+	const diff = `+1 ${"x".repeat(120)}`;
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	for (const line of component.render(40)) {
+		assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}: ${JSON.stringify(stripTerminalSequences(line))}`);
+	}
+});
+
+check("diff 中的 tab 展开为 3 个空格", () => {
+	const edit = renderers("edit");
+	const diff = "-1 \told\n+1 \tnew";
+	const out = dedent(
+		text(edit.renderResult({ content: [{ type: "text", text: "ok" }], details: { diff } }, { expanded: false, isPartial: false }, theme, ctx({ args: { path: "a.ts" } }))),
+	);
+	assert.equal(out.includes("\t"), false, JSON.stringify(out));
+	assert.match(out, /-1 {4}old/);
+	assert.match(out, /\+1 {4}new/);
+});
+
+check("diff 长行带词级高亮时不超宽", () => {
+	const edit = renderers("edit");
+	const diff = `-1 ${"a".repeat(100)}OLD\n+1 ${"a".repeat(100)}NEW`;
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	for (const line of component.render(40)) {
+		assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}: ${JSON.stringify(stripTerminalSequences(line))}`);
+	}
+});
+
+check("shortenPath 只缩写完整的 home 前缀", () => {
+	const edit = renderers("edit");
+	const home = homedir().replace(/\\/g, "/").replace(/\/+$/, "");
+	const inside = `${home}/project/a.ts`;
+	const sibling = `${home}by/a.ts`;
+	const title = (path: string) =>
+		dedent(
+			text(
+				edit.renderResult(
+					{ content: [{ type: "text", text: "ok" }], details: { diff: "" } },
+					{ expanded: false, isPartial: false },
+					theme,
+					ctx({ args: { path } }),
+				),
+			),
+		);
+	assert.ok(title(inside).includes("~/project/a.ts"), title(inside));
+	assert.ok(title(sibling).includes(sibling), title(sibling));
 });
 
 check("write 展示写入预览：行数 + 超过 10 行截断提示", () => {
@@ -373,9 +546,4 @@ check("隐藏思考标签在 pi 的斜体包裹下不再显示为斜体", () => 
 	assert.equal(italic, false, JSON.stringify(composed));
 });
 
-const failed = results.filter((r) => !r.ok);
-for (const r of results) {
-	console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
-}
-console.log(`\n${results.length - failed.length}/${results.length} 通过`);
-process.exit(failed.length === 0 ? 0 : 1);
+finish();

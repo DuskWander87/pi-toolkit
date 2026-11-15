@@ -6,6 +6,7 @@
 import assert from "node:assert";
 import {
 	AssistantMessageComponent,
+	InteractiveMode,
 	ToolExecutionComponent,
 	UserMessageComponent,
 	getMarkdownTheme,
@@ -15,15 +16,21 @@ import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
 import extend, {
 	ToolRunGroup,
 	ToolRunSummary,
+	applyThinkingVisibility,
 	applyThoughtLabel,
 	describeRun,
+	finishMessage,
 	groupSilentTurns,
 	groupToolRuns,
+	installToolRunGroups,
 	isGroupable,
 	isSilentTurn,
+	refreshToolRuns,
 	summarize,
 	thoughtLabel,
+	trackThinking,
 } from "../extensions/tool-run-groups/index.ts";
+import { check, finish as finishSuite } from "./harness.ts";
 
 initTheme("dark", false);
 extend({ on() {}, registerTool() {} } as any);
@@ -38,7 +45,7 @@ function toolRow(toolName: string, toolCallId: string, args: Record<string, unkn
 		args,
 		{},
 		{},
-		{ requestRender() {} },
+		{ requestRender() {} } as any,
 		process.cwd(),
 	);
 }
@@ -74,16 +81,6 @@ function groupOf(mode: { chatContainer: Container }): ToolRunGroup {
 	const groups = mode.chatContainer.children.filter((child) => child instanceof ToolRunGroup);
 	assert.equal(groups.length, 1, "应恰好生成一个聚合组件");
 	return groups[0] as ToolRunGroup;
-}
-
-const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
-function check(name: string, fn: () => void) {
-	try {
-		fn();
-		results.push({ name, ok: true });
-	} catch (error) {
-		results.push({ name, ok: false, detail: (error as Error).message });
-	}
 }
 
 check("按首次出现顺序汇总，shell 用 command 作量词", () => {
@@ -181,16 +178,7 @@ check("展开态先摘要行，再铺开每个工具行的完整内容", () => {
 	assert.ok(lines.slice(2).some((line) => line.includes("command")), JSON.stringify(lines));
 });
 
-check("执行中显示 Running，失败时标注数量", () => {
-	const running = new ToolRunGroup({
-		rows: [bashRow("c1", "ls"), bashRow("c2", "pwd")],
-		toolNames: ["bash", "bash"],
-		expanded: false,
-		theme: () => undefined,
-		requestRender() {},
-	});
-	assert.ok(plain(running.render(WIDTH))[1]!.includes("Running 2 shell commands"));
-
+check("失败时标注数量", () => {
 	const failed = fakeMode([finishedBash("c1", "ls"), finish(bashRow("c2", "pwd"), true)]);
 	groupToolRuns(failed);
 	const line = plain(groupOf(failed).render(WIDTH))[1]!;
@@ -202,7 +190,7 @@ check("失败只把计数片段标红，摘要正文保持 dim", () => {
 	const themed = () => ({ fg: (name: string, text: string) => `{${name}|${text}}` }) as any;
 	const rows = [finishedBash("c1", "ls"), finish(bashRow("c2", "pwd"), true)];
 	const group = new ToolRunGroup({
-		rows,
+		rows: rows as any,
 		toolNames: ["bash", "bash"],
 		expanded: false,
 		theme: themed,
@@ -221,16 +209,6 @@ check("失败只把计数片段标红，摘要正文保持 dim", () => {
 	const summaryLine = summary.render(200)[1]!;
 	assert.ok(summaryLine.includes("{dim|ran 2 shell commands}"), summaryLine);
 	assert.ok(summaryLine.includes("{error| · 1 failed}"), summaryLine);
-});
-
-check("思考耗时只计入刚结束的那条消息", () => {
-	const matched = fakeMode([finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
-	groupToolRuns(matched, { ids: new Set(["c1", "c2"]), thoughtMs: 3200 });
-	assert.ok(plain(groupOf(matched).render(WIDTH))[1]!.includes("Thought for 3s, ran 2 shell commands"));
-
-	const mismatched = fakeMode([finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
-	groupToolRuns(mismatched, { ids: new Set(["c9"]), thoughtMs: 3200 });
-	assert.equal(plain(groupOf(mismatched).render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
 });
 
 check("重复聚合不叠加", () => {
@@ -259,14 +237,21 @@ check("摘要行不超过渲染宽度", () => {
 	assert.ok(narrow[1]!.length <= 12, JSON.stringify(narrow[1]));
 });
 
-/** 助手消息：思考块隐藏时只渲染标签行；`text` 才是可见文本。 */
-function assistantRow(options: { text?: string; thinking?: string; stopReason?: string } = {}) {
+/** 助手消息：默认隐藏思考正文；`text` 才是可见文本。 */
+function assistantRow(
+	options: {
+		text?: string;
+		thinking?: string;
+		stopReason?: string;
+		hideThinkingBlock?: boolean;
+	} = {},
+) {
 	const content: Array<Record<string, unknown>> = [];
 	if (options.thinking !== undefined) content.push({ type: "thinking", thinking: options.thinking });
 	if (options.text !== undefined) content.push({ type: "text", text: options.text });
 	return new AssistantMessageComponent(
 		{ content, stopReason: options.stopReason ?? "stop" } as never,
-		true,
+		options.hideThinkingBlock ?? true,
 		getMarkdownTheme(),
 		"Thinking...",
 		1,
@@ -280,24 +265,6 @@ function summariesOf(mode: { chatContainer: Container }): ToolRunSummary[] {
 	) as ToolRunSummary[];
 }
 
-check("同一条消息被分隔成多段时，耗时只计在第一段", () => {
-	const mode = fakeMode([
-		finishedBash("c1", "ls"),
-		finishedBash("c2", "pwd"),
-		new Container(),
-		finishedBash("c3", "id"),
-		finishedBash("c4", "date"),
-	]);
-	groupToolRuns(mode, { ids: new Set(["c1", "c2", "c3", "c4"]), thoughtMs: 2400 });
-
-	const groups = mode.chatContainer.children.filter(
-		(child) => child instanceof ToolRunGroup,
-	) as ToolRunGroup[];
-	assert.equal(groups.length, 2);
-	assert.ok(plain(groups[0]!.render(WIDTH))[1]!.includes("Thought for 2s"), "第一段带耗时");
-	assert.equal(plain(groups[1]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
-});
-
 check("静默轮次判定：隐藏思考或空内容算静默，可见文本与中断报错不算", () => {
 	assert.equal(isSilentTurn(assistantRow({ thinking: "想一想" })), true);
 	assert.equal(isSilentTurn(assistantRow({})), true);
@@ -306,6 +273,83 @@ check("静默轮次判定：隐藏思考或空内容算静默，可见文本与�
 	assert.equal(isSilentTurn(assistantRow({ stopReason: "aborted" })), false);
 	assert.equal(isSilentTurn(assistantRow({ stopReason: "length" })), false);
 	assert.equal(isSilentTurn(finishedBash("c1", "ls")), false);
+});
+
+check("显示思考时，收起态也不渲染静默轮次的思考正文", () => {
+	const think = assistantRow({ thinking: "这是一段很长的思考正文", hideThinkingBlock: false });
+	const mode = fakeMode([think, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 1500 });
+	const summary = summariesOf(mode)[0]!;
+
+	const collapsed = plain(summary.render(WIDTH));
+	assert.equal(collapsed.length, 2, JSON.stringify(collapsed));
+	assert.equal(collapsed[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(collapsed.join("\n").includes("这是一段很长的思考正文"), false, JSON.stringify(collapsed));
+
+	summary.setExpanded(true);
+	const expanded = plain(summary.render(WIDTH));
+	assert.ok(expanded.join("\n").includes("这是一段很长的思考正文"), JSON.stringify(expanded));
+});
+
+check("带正文的助手消息收起时保留正文，思考可见性不变", () => {
+	const answer = assistantRow({
+		thinking: "思考正文",
+		text: "我发现了问题",
+		hideThinkingBlock: false,
+	});
+	const mode = fakeMode([
+		assistantRow({ thinking: "先看看" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		answer,
+		finishedBash("c3", "cat a"),
+		finishedBash("c4", "cat b"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
+	assert.ok(lines.some((line) => line.includes("我发现了问题")), JSON.stringify(lines));
+	// D1：带可见文本的消息不投影为 text-only，思考正文仍随 hideThinkingBlock 显示。
+	assert.ok(lines.some((line) => line.includes("思考正文")), JSON.stringify(lines));
+});
+
+check("最终纯文本回复并入摘要并计入耗时", () => {
+	const realNow = Date.now;
+	let now = 1000;
+	Date.now = () => now;
+	try {
+		const mode = fakeMode([assistantRow({ thinking: "先看看" }), finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+		groupToolRuns(mode);
+		groupSilentTurns(mode);
+
+		const final = assistantRow({ text: "已经修好了。" });
+		applyThoughtLabel(final, 900);
+		mode.chatContainer.addChild(final);
+
+		trackThinking({ type: "message_start", message: { role: "assistant" } });
+		now = 1500;
+		trackThinking({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "补充说明" }] },
+		});
+		now = 2400;
+		finishMessage(mode, {
+			type: "message_end",
+			message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "已经修好了。" }] },
+		});
+
+		const summaries = summariesOf(mode);
+		assert.equal(summaries.length, 1);
+		assert.equal(summaries[0]!.children.includes(final), true, "最终回复应并入摘要");
+		const lines = plain(summaries[0]!.render(WIDTH));
+		assert.equal(lines[1]!.trimStart(), "Thought for 1s, ran 2 shell commands", JSON.stringify(lines));
+		assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
+		assert.equal(lines.join("\n").includes("已经修好了。"), true, JSON.stringify(lines));
+		assert.equal((final as any).hiddenThinkingLabel, "", "并入摘要后清空耗时标签");
+	} finally {
+		Date.now = realNow;
+	}
 });
 
 check("连续静默轮次合并成一行摘要，耗时按轮累加", () => {
@@ -380,7 +424,7 @@ check("请求开头带文本的回复留在摘要外，它引发的工具并入�
 		finishedBash("c3", "cat a"),
 		finishedBash("c4", "cat b"),
 	]);
-	groupToolRuns(mode, { ids: new Set(["c1", "c2"]), thoughtMs: 2000 });
+	groupToolRuns(mode);
 	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : 3000) });
 
 	assert.equal(mode.chatContainer.children.length, 2);
@@ -470,7 +514,7 @@ check("同一请求的工具段随轮次增长合入同一行摘要", () => {
 	const text = assistantRow({ text: "我先看看目录" });
 	const elapsed = (item: unknown) => (item === text ? 1000 : undefined);
 	const mode = fakeMode([text, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
-	groupToolRuns(mode, { ids: new Set(["c1", "c2"]), thoughtMs: 1000 });
+	groupToolRuns(mode);
 	groupSilentTurns(mode, { thoughtMsFor: elapsed });
 	assert.equal(summariesOf(mode).length, 1);
 	assert.equal(
@@ -579,6 +623,23 @@ check("报错与中断的轮次留在摘要外，工具段仍各自折叠", () =
 	assert.ok(summaries.every((summary) => !summary.children.includes(aborted)));
 	assert.equal(mode.chatContainer.children.includes(failed), true);
 	assert.equal(mode.chatContainer.children.includes(aborted), true);
+});
+
+check("报错与中断的前置消息保留自己的耗时标签", () => {
+	for (const stopReason of ["error", "aborted"]) {
+		const failed = assistantRow({ stopReason, thinking: "出错了" });
+		applyThoughtLabel(failed, 3000);
+		const mode = fakeMode([failed, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+		groupToolRuns(mode);
+		groupSilentTurns(mode, { thoughtMsFor: (item) => (item === failed ? 3000 : undefined) });
+
+		const summary = summariesOf(mode)[0]!;
+		assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands", stopReason);
+		assert.ok(
+			plain(failed.render(WIDTH)).join("\n").includes("Thought for 3s"),
+			`${stopReason}: 标签应保留`,
+		);
+	}
 });
 
 check("单条工具行组成的静默轮次同样折叠", () => {
@@ -739,7 +800,7 @@ check("收起态点击改动行交给行自己处理", () => {
 check("展开态重建后新纳入的工具组也展开", () => {
 	const group = (ids: [string, string], expanded: boolean) =>
 		new ToolRunGroup({
-			rows: [finishedBash(ids[0], ids[0]), finishedBash(ids[1], ids[1])],
+			rows: [finishedBash(ids[0], ids[0]), finishedBash(ids[1], ids[1])] as any,
 			toolNames: ["bash", "bash"],
 			expanded,
 			theme: () => undefined,
@@ -798,9 +859,62 @@ check("请求级摘要吸收带正文的后续回复，只留一行耗时", () =
 	);
 });
 
-const failed = results.filter((r) => !r.ok);
-for (const r of results) {
-	console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
-}
-console.log(`\n${results.length - failed.length}/${results.length} 通过`);
-process.exit(failed.length === 0 ? 0 : 1);
+check("折叠内的助手消息同步思考可见性", () => {
+	const answer = assistantRow({ thinking: "折叠里的思考", text: "正文", hideThinkingBlock: false });
+	const summary = new ToolRunSummary({
+		items: [answer],
+		expanded: false,
+		theme: () => undefined,
+		requestRender() {},
+	});
+
+	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
+	applyThinkingVisibility(summary, true);
+	assert.equal(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"), false);
+	applyThinkingVisibility(summary, false);
+	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
+});
+
+check("Pi 切换隐藏思考时，折叠内的消息跟随实例上的开关", () => {
+	assert.equal(installToolRunGroups(), true);
+	const answer = assistantRow({ thinking: "折叠里的思考", text: "正文", hideThinkingBlock: false });
+	const chat = new Container();
+	const summary = new ToolRunSummary({
+		items: [answer],
+		expanded: false,
+		theme: () => undefined,
+		requestRender() {},
+	});
+	chat.addChild(summary);
+
+	// Pi 1.5.2 调 `updateThinkingBlockVisibility()` 时不传参数；开关在实例字段上。
+	const mode = { hideThinkingBlock: true, chatContainer: chat, ui: { requestRender() {} } };
+	const update = (
+		InteractiveMode.prototype as unknown as { updateThinkingBlockVisibility: (this: typeof mode) => void }
+	).updateThinkingBlockVisibility;
+
+	update.call(mode);
+	assert.equal(
+		(answer as unknown as { hideThinkingBlock: boolean }).hideThinkingBlock,
+		true,
+		"折叠内消息应跟随 Pi 的隐藏设置",
+	);
+	assert.equal(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"), false);
+
+	mode.hideThinkingBlock = false;
+	update.call(mode);
+	assert.equal((answer as unknown as { hideThinkingBlock: boolean }).hideThinkingBlock, false);
+	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
+});
+
+check("重复安装接管仍成功且不叠加处理", () => {
+	assert.equal(installToolRunGroups(), true);
+	assert.equal(installToolRunGroups(), true);
+	const mode = fakeMode([finishedBash("r1", "ls"), finishedBash("r2", "pwd")]);
+	refreshToolRuns(mode);
+
+	assert.equal(mode.chatContainer.children.length, 1);
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+});
+
+finishSuite();

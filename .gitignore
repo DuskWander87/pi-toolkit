@@ -12,6 +12,7 @@ dist/
 build/
 out/
 *.tsbuildinfo
+assets/*.ansi
 
 # 测试与覆盖率
 coverage/
@@ -33,6 +34,9 @@ temp/
 .idea/
 .vscode/
 *.iml
+
+.claude/
+.serena/
 
 # 操作系统
 .DS_Store

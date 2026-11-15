@@ -84,12 +84,15 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 ```bash
 npm test
+npm run typecheck
 ```
 
-测试依赖 `jiti`、`chalk` 与两个 host 包。新 clone 且没有 `node_modules` 时，先装一份不写入 `package.json` 的依赖：
+`npm run typecheck` 用 npx 临时运行 TypeScript，首次需要联网，不写入 `node_modules`。
+
+测试依赖 `jiti`、`chalk` 与两个 host 包，类型检查另需 `@types/node`（它在 host 包的开发依赖里，不会随上面这些包一起装上）。新 clone 且没有 `node_modules` 时，先装一份不写入 `package.json` 的依赖：
 
 ```bash
-npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk
+npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk @types/node
 ```
 
 本机已经把 `node_modules` 指向 Pi 安装目录时，跳过这一步。
@@ -100,6 +103,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 | `test/message-marks.test.ts` | `message-marks`：用户消息、助手与工具圆点、颜色、行宽 |
 | `test/editor-prefix.test.ts` | `message-marks`：输入框前缀、宽度与光标 |
 | `test/tool-run-groups.test.ts` | `tool-run-groups`：聚合、边界、摘要文案、展开与点击 |
+| `test/integration.test.ts` | 三个扩展同时安装时的左缘对齐与静默轮次可见性 |
 
 ## 许可
 

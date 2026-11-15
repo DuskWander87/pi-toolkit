@@ -61,8 +61,9 @@
 |---|---|
 | 收起，有思考耗时 | `Thought for 28s, ran 8 shell commands` |
 | 收起，无思考耗时 | `ran 8 shell commands` |
-| 执行中 | `Running 3 shell commands…`（仅限已折叠的区间；未结束的工具段不折叠） |
 | 有失败 | 在末尾追加 ` · 1 failed`，只有这一段标红，摘要正文保持 dim |
+
+执行中的工具段不产生摘要，保持原行与实时计时；工具结束后才合成摘要。
 
 工具名按首次出现顺序汇总，`bash` 显示为 `shell`：
 
@@ -103,10 +104,11 @@
 
 ## 实现原理
 
-Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` 消息），因此本扩展接管 `InteractiveMode` 的两个私有方法：
+Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` 消息），因此本扩展接管 `InteractiveMode` 的私有方法：
 
 - `handleEvent`：在 `message_end` 之后记录思考耗时、替换隐藏思考标签，并聚合当前工具行；在 `tool_execution_end` 之后重新扫描一次，把刚跑完的工具收进摘要
 - `renderSessionItems`：历史回放结束后同样聚合
+- `updateThinkingBlockVisibility`：先交给 Pi 处理顶层消息，再把可见性同步到摘要与工具组内部
 
 聚合只是把 Pi 自己创建并持续更新的 `ToolExecutionComponent` 移入容器组件，工具执行、结果回填与会话数据都不受影响。重复聚合不会叠加；区间未变化时复用原实例，保留用户的折叠状态。如果 `InteractiveMode` 的内部方法缺失，安装失败并在 `session_start` 时提示。
 
@@ -116,7 +118,7 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 - **执行期间有一段过渡态**：工具段在执行中不折叠，于是从思考结束到工具跑完之间会同时看到 `Thought for Ns` 与带实时计时的工具行，工具结束后才收敛成一行摘要。实时计时与“从思考结束起就只有一行”不可兼得，当前选前者：长命令执行期间，命令行和计时比提前合并更有用
 - **静默轮次判定依赖助手组件内部字段**：`markdownSlots` 与 `lastMessage.stopReason`；结构变化时退化到不合并，不会错误地藏起内容
 - **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，回放出来的摘要行与隐藏标签不带 `Thought for Ns`
-- **思考可见性开关只作用于未折叠的消息**：Pi 的 `updateThinkingBlockVisibility` / `setHiddenThinkingLabel` 只遍历 `chatContainer` 顶层，被折叠进摘要的轮次收不到更新，切换后需要重建会话才同步
+- **思考可见性同步只覆盖折叠区**：切换隐藏思考时会额外进入摘要与工具组，其他容器沿用 Pi 原本的处理
 
 ## 测试
 

@@ -6,6 +6,11 @@
 import assert from "node:assert";
 import {
 	AssistantMessageComponent,
+	BashExecutionComponent,
+	BranchSummaryMessageComponent,
+	CompactionSummaryMessageComponent,
+	CustomMessageComponent,
+	SkillInvocationMessageComponent,
 	ToolExecutionComponent,
 	UserMessageComponent,
 	getMarkdownTheme,
@@ -15,9 +20,13 @@ import {
 import { Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import extend, {
 	SUCCESS_MARKER_COLOR,
+	installAssistantMarks,
+	installMessageMarks,
+	installToolMarks,
 	installUserMessagePrefix,
 	prefixFirstContentLine,
 } from "../extensions/message-marks/index.ts";
+import { check, finish } from "./harness.ts";
 
 initTheme("dark", false);
 installUserMessagePrefix();
@@ -26,19 +35,9 @@ installUserMessagePrefix();
 /** 测试用主题桩：扩展只用到 `fg()` 与 `style()` 两个方法。 */
 const testTheme = {
 	fg: (token: string, text: string) => `[38;2;255;85;85m${text}[39m`,
-	style: (text: string, options: { fg?: { r: number; g: number; b: number } }) =>
+	style: (text: string, options: { fg?: any }) =>
 		options.fg ? `[38;2;${options.fg.r};${options.fg.g};${options.fg.b}m${text}[39m` : text,
 };
-
-const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
-function check(name: string, fn: () => void) {
-	try {
-		fn();
-		results.push({ name, ok: true });
-	} catch (error) {
-		results.push({ name, ok: false, detail: (error as Error).message });
-	}
-}
 
 function visibleLines(text: string, width = 40): string[] {
 	return new UserMessageComponent(text, getMarkdownTheme(), 1)
@@ -263,6 +262,14 @@ check("重复安装不叠加助手圆点", () => {
 	assert.equal((lines[row]!.match(/●/g) ?? []).length, 1, JSON.stringify(lines[row]));
 });
 
+check("重复安装后的输出与单次安装一致", () => {
+	const content = [{ type: "text", text: "一段话。" }];
+	const before = plain(assistantLines(content));
+	installAssistantMarks();
+	installToolMarks();
+	assert.deepEqual(plain(assistantLines(content)), before);
+});
+
 check("工具行首圆点成功为蓝色", () => {
 	const lines = toolLines({ content: [], isError: false, durationMs: 12 });
 	const marker = testTheme.style("●", { fg: SUCCESS_MARKER_COLOR });
@@ -307,9 +314,134 @@ check("重复安装不叠加工具圆点", () => {
 	assert.equal((lines.join("").match(/●/g) ?? []).length, 1, lines.join("\n"));
 });
 
-const failed = results.filter((r) => !r.ok);
-for (const r of results) {
-	console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
+check("主题变化后工具圆点更新（缓存按 marker 失效）", () => {
+	const component = new ToolExecutionComponent(
+		"demo",
+		"call-theme",
+		{ path: "a.ts" },
+		{ outputPad: 1 },
+		DEMO_TOOL as any,
+		{ requestRender() {} } as any,
+		process.cwd(),
+	);
+	component.markExecutionStarted();
+	component.setArgsComplete();
+	component.updateResult({ content: [], isError: false } as any, false);
+	const before = plain(component.render(WIDTH));
+
+	const altTheme = {
+		fg: (token: string, text: string) => `<${token}>${text}</${token}>`,
+		style: (text: string) => `[${text}]`,
+	};
+	try {
+		extend({
+			on(_event: string, handler: (...args: any[]) => void) {
+				handler({}, { hasUI: true, ui: { theme: altTheme, setEditorComponent() {} } });
+			},
+		} as any);
+		const after = plain(component.render(WIDTH));
+		assert.notDeepEqual(after, before, "主题变化后应重新渲染圆点");
+		assert.equal((after.join("").match(/●/g) ?? []).length, 1, after.join("\n"));
+	} finally {
+		extend({
+			on(_event: string, handler: (...args: any[]) => void) {
+				handler({}, { hasUI: true, ui: { theme: testTheme, setEditorComponent() {} } });
+			},
+		} as any);
+	}
+});
+
+// ---------------------------------------------------------------- 系统类组件缩进
+const fakeUI = { requestRender() {} } as any;
+const systemMarkdown = getMarkdownTheme();
+
+function assertGutterAligned(lines: string[], width = WIDTH): void {
+	for (const line of lines) {
+		assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${JSON.stringify(stripTerminalSequences(line))}`);
+		if (isBlank(line)) continue;
+		assert.equal(contentColumn(stripTerminalSequences(line)), 2, JSON.stringify(stripTerminalSequences(line)));
+	}
+	const joined = plain(lines).join("\n");
+	assert.equal(joined.includes("●"), false, joined);
+	assert.equal(joined.includes("›"), false, joined);
 }
-console.log(`\n${results.length - failed.length}/${results.length} 通过`);
-process.exit(failed.length === 0 ? 0 : 1);
+
+function bashComponent(outputPad = 1): BashExecutionComponent {
+	return new BashExecutionComponent("echo hi", fakeUI, false, outputPad);
+}
+
+check("系统类组件左缘对齐到第 2 列", () => {
+	const compaction = new CompactionSummaryMessageComponent(
+		{ role: "compactionSummary", summary: "压缩前的摘要内容。", tokensBefore: 12000, timestamp: 0 } as any,
+		systemMarkdown,
+		1,
+	);
+	const branch = new BranchSummaryMessageComponent(
+		{ role: "branchSummary", summary: "分支摘要内容。", fromId: null, timestamp: 0 } as any,
+		systemMarkdown,
+		1,
+	);
+	const skill = new SkillInvocationMessageComponent(
+		{ name: "demo", location: "/skills/demo", content: "技能内容。", userMessage: undefined } as any,
+		systemMarkdown,
+		1,
+	);
+	const custom = new CustomMessageComponent(
+		{ role: "custom", customType: "demo", content: "自定义消息内容。", display: true, timestamp: 0 } as any,
+		undefined,
+		systemMarkdown,
+		1,
+	);
+	const bash = bashComponent();
+
+	assertGutterAligned(compaction.render(WIDTH));
+	assertGutterAligned(branch.render(WIDTH));
+	assertGutterAligned(skill.render(WIDTH));
+	assertGutterAligned(custom.render(WIDTH));
+	assertGutterAligned(bash.render(WIDTH));
+	bash.setComplete(0, false);
+});
+
+check("bash 运行态与满宽边框不超宽", () => {
+	const bash = bashComponent();
+	const lines = bash.render(WIDTH);
+	assertGutterAligned(lines);
+	const border = plain(lines).find((line) => line.includes("─"));
+	assert.ok(border !== undefined, JSON.stringify(plain(lines)));
+	assert.equal(visibleWidth(lines[plain(lines).indexOf(border!)]!), WIDTH);
+	bash.setComplete(0, false);
+});
+
+check("bash 在 outputPad=0 与 2 下都对齐到第 2 列", () => {
+	for (const pad of [0, 2]) {
+		const bash = bashComponent(pad);
+		assertGutterAligned(bash.render(WIDTH));
+		bash.setComplete(0, false);
+	}
+});
+
+check("customRenderer 满宽输出被截回原宽度", () => {
+	const custom = new CustomMessageComponent(
+		{ role: "custom", customType: "demo", content: "x", display: true, timestamp: 0 } as any,
+		() => new Text("X".repeat(WIDTH), 0, 0),
+		systemMarkdown,
+		1,
+	);
+	const lines = custom.render(WIDTH);
+	const row = plain(lines).find((line) => line.includes("X"));
+	assert.ok(row !== undefined, JSON.stringify(plain(lines)));
+	assert.equal(row!.startsWith("  "), true, JSON.stringify(row));
+	assert.equal(visibleWidth(lines[plain(lines).indexOf(row!)]!), WIDTH);
+});
+
+check("重复安装系统组件不叠加缩进", () => {
+	installMessageMarks();
+	const compaction = new CompactionSummaryMessageComponent(
+		{ role: "compactionSummary", summary: "重复安装后的内容。", tokensBefore: 100, timestamp: 0 } as any,
+		systemMarkdown,
+		1,
+	);
+	assertGutterAligned(compaction.render(WIDTH));
+});
+
+finish();

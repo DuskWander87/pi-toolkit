@@ -16,7 +16,12 @@
 
 import {
 	AssistantMessageComponent,
+	BashExecutionComponent,
+	BranchSummaryMessageComponent,
+	CompactionSummaryMessageComponent,
 	CustomEditor,
+	CustomMessageComponent,
+	SkillInvocationMessageComponent,
 	ToolExecutionComponent,
 	UserMessageComponent,
 	getSelectListTheme,
@@ -28,6 +33,7 @@ import {
 import {
 	MouseRegion,
 	stripTerminalSequences,
+	truncateToWidth,
 	visibleWidth,
 	type Color,
 	type EditorTheme,
@@ -41,9 +47,16 @@ const MARKER = "●";
 const GUTTER = 2;
 /** 成功工具的圆点颜色：主题没有蓝色令牌，取固定蓝。 */
 export const SUCCESS_MARKER_COLOR: Color = { kind: "rgb", r: 86, g: 156, b: 214 };
-const PATCHED_USER = Symbol.for("pi-toolkit.message-marks.user");
-const PATCHED_ASSISTANT = Symbol.for("pi-toolkit.message-marks.assistant");
-const PATCHED_TOOL = Symbol.for("pi-toolkit.message-marks.tool");
+/** 原型上保存的原始 `render`：`/reload` 重新安装时新 wrapper 仍调用它，不叠加。 */
+const ORIGINAL_USER = Symbol.for("pi-toolkit.message-marks.user.original");
+const ORIGINAL_ASSISTANT = Symbol.for("pi-toolkit.message-marks.assistant.original");
+const ORIGINAL_TOOL = Symbol.for("pi-toolkit.message-marks.tool.original");
+/** 系统类组件只缩进、不加圆点；这些符号同时保存各自的原始 `render`。 */
+const GUTTER_BASH = Symbol.for("pi-toolkit.message-marks.bash");
+const GUTTER_COMPACTION = Symbol.for("pi-toolkit.message-marks.compaction");
+const GUTTER_BRANCH = Symbol.for("pi-toolkit.message-marks.branch");
+const GUTTER_CUSTOM = Symbol.for("pi-toolkit.message-marks.custom");
+const GUTTER_SKILL = Symbol.for("pi-toolkit.message-marks.skill");
 /** `session_start` 取得的主题代理：切换主题后仍然跟随。 */
 let activeTheme: Theme | undefined;
 
@@ -132,6 +145,43 @@ export function gutterLine(line: string): string {
 	return trimTrailingSpaces(line.slice(0, start) + " ".repeat(missing) + line.slice(start), missing);
 }
 
+interface TransformCache {
+	key: string;
+	source: readonly string[];
+	result: string[];
+}
+
+/** 每个组件上一次的渲染结果：内容未变时省去逐行正则与宽度计算。 */
+const transformCache = new WeakMap<object, TransformCache>();
+
+/**
+ * 按 `key` 与原始行内容缓存转换结果。
+ *
+ * 命中条件是宽度 / 标记等 `key` 相同，且底层 `render` 返回的行内容逐项引用不变。
+ * 窗口 resize、主题或状态切换都会让 `key` 变化并自然 miss。
+ */
+function cachedTransform(
+	component: object,
+	lines: string[],
+	key: string,
+	transform: (lines: string[]) => string[],
+): string[] {
+	const cached = transformCache.get(component);
+	if (cached && cached.key === key && cached.source.length === lines.length) {
+		let same = true;
+		for (let index = 0; index < lines.length; index++) {
+			if (cached.source[index] !== lines[index]) {
+				same = false;
+				break;
+			}
+		}
+		if (same) return cached.result;
+	}
+	const result = transform(lines);
+	transformCache.set(component, { key, source: lines.slice(), result });
+	return result;
+}
+
 /** 用标记替换行首的两格留白，行宽不变。 */
 function markLine(line: string, marker: string): string {
 	const start = leadingSequenceLength(line);
@@ -163,16 +213,24 @@ export function prefixFirstContentLine(lines: string[], prefix: string): string[
 	return result;
 }
 
-/** 接管 UserMessageComponent 的渲染：去掉背景色后加前缀，重复加载不会叠加。 */
+/**
+ * 接管 UserMessageComponent 的渲染：去掉背景色后加前缀。
+ *
+ * 原始方法只在首次安装时保存；重复安装（含同进程 `/reload`）用新 wrapper
+ * 覆盖旧 wrapper，总是调用同一份原始实现，因此不会叠加。
+ */
 export function installUserMessagePrefix(component: typeof UserMessageComponent = UserMessageComponent): void {
 	const prototype = component.prototype as unknown as PatchedPrototype & Record<PropertyKey, unknown>;
-	if (prototype[PATCHED_USER]) return;
-	prototype[PATCHED_USER] = true;
-
-	const render = prototype.render;
+	const render = (prototype[ORIGINAL_USER] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (width: number): string[] {
-		const lines = render.call(this, width).map((line) => line.replace(BACKGROUND_SEQUENCE, ""));
-		return prefixFirstContentLine(lines, getSelectListTheme().description(PREFIX));
+		const lines = render.call(this, width);
+		const prefix = getSelectListTheme().description(PREFIX);
+		return cachedTransform(this, lines, `${width}\0${prefix}`, (source) =>
+			prefixFirstContentLine(
+				source.map((line) => line.replace(BACKGROUND_SEQUENCE, "")),
+				prefix,
+			),
+		);
 	};
 }
 
@@ -201,7 +259,10 @@ function firstTextRow(component: AssistantInternals, lines: string[]): number {
 	if (!layout || !slots) return -1;
 	let row = 0;
 	for (const child of layout.children) {
-		const inner = child.component instanceof MouseRegion ? child.component.child : child.component;
+		const inner =
+			child.component instanceof MouseRegion
+				? (child.component as unknown as { child: unknown }).child
+				: child.component;
 		const slot = slots.find((entry) => entry.markdown === inner);
 		if (slot?.kind === "text") {
 			const end = Math.min(row + child.height, lines.length);
@@ -218,40 +279,68 @@ function firstTextRow(component: AssistantInternals, lines: string[]): number {
 /** 接管 AssistantMessageComponent 的渲染：整条消息对齐到标记栏，首个文本块行首加圆点。 */
 export function installAssistantMarks(component: typeof AssistantMessageComponent = AssistantMessageComponent): void {
 	const prototype = component.prototype as unknown as AssistantInternals & Record<PropertyKey, unknown>;
-	if (prototype[PATCHED_ASSISTANT]) return;
-	prototype[PATCHED_ASSISTANT] = true;
-
-	const render = prototype.render;
+	const render = (prototype[ORIGINAL_ASSISTANT] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (this: AssistantInternals, width: number): string[] {
 		const lines = render.call(this, width);
-		for (let i = 0; i < lines.length; i++) lines[i] = gutterLine(lines[i]!);
-		const row = firstTextRow(this, lines);
-		if (row !== -1) lines[row] = markLine(lines[row]!, assistantMarker());
-		return lines;
+		const marker = assistantMarker();
+		const slots = this.markdownSlots?.length ?? -1;
+		const rows = this.contentContainer?.mouseLayout?.children.length ?? -1;
+		const key = `${width}\0${marker}\0${slots}\0${rows}`;
+		return cachedTransform(this, lines, key, (source) => {
+			const guttered = source.map((line) => gutterLine(line));
+			const row = firstTextRow(this, guttered);
+			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
+			return guttered;
+		});
 	};
 }
 
 /** 接管 ToolExecutionComponent 的渲染：整块对齐到标记栏，首行加状态圆点。 */
 export function installToolMarks(component: typeof ToolExecutionComponent = ToolExecutionComponent): void {
 	const prototype = component.prototype as unknown as ToolInternals & Record<PropertyKey, unknown>;
-	if (prototype[PATCHED_TOOL]) return;
-	prototype[PATCHED_TOOL] = true;
-
-	const render = prototype.render;
+	const render = (prototype[ORIGINAL_TOOL] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (this: ToolInternals, width: number): string[] {
 		const lines = render.call(this, width);
-		for (let i = 0; i < lines.length; i++) lines[i] = gutterLine(lines[i]!);
-		const row = lines.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
-		if (row !== -1) lines[row] = markLine(lines[row]!, toolMarker(this));
-		return lines;
+		const marker = toolMarker(this);
+		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
+			const guttered = source.map((line) => gutterLine(line));
+			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
+			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
+			return guttered;
+		});
 	};
 }
 
-/** 一次安装用户消息、助手消息与工具调用三处标记。 */
+/**
+ * 系统类组件只对齐左缘：整块补到第 2 列，不加圆点、不剥离背景色。
+ *
+ * 满宽行（如 bash 的上下边框）插入空格后会超出渲染宽度；从行尾回收不到空格时
+ * 直接截回原宽度，否则 Pi 会因超宽行抛错。
+ */
+export function installGutter(component: { prototype: object }, symbol: symbol): void {
+	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
+	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
+	prototype.render = function (width: number): string[] {
+		const lines = render.call(this, width);
+		return cachedTransform(this, lines, `${width}\0${String(symbol.description)}`, (source) =>
+			source.map((line) => {
+				const guttered = gutterLine(line);
+				return visibleWidth(guttered) > width ? truncateToWidth(guttered, width, "") : guttered;
+			}),
+		);
+	};
+}
+
+/** 一次安装消息、工具与系统类组件的左缘对齐。 */
 export function installMessageMarks(): void {
 	installUserMessagePrefix();
 	installAssistantMarks();
 	installToolMarks();
+	installGutter(BashExecutionComponent, GUTTER_BASH);
+	installGutter(CompactionSummaryMessageComponent, GUTTER_COMPACTION);
+	installGutter(BranchSummaryMessageComponent, GUTTER_BRANCH);
+	installGutter(CustomMessageComponent, GUTTER_CUSTOM);
+	installGutter(SkillInvocationMessageComponent, GUTTER_SKILL);
 }
 
 /**

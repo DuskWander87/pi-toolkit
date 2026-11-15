@@ -84,12 +84,15 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 ```bash
 npm test
+npm run typecheck
 ```
 
-Tests need `jiti` and the two host packages. On a fresh clone without `node_modules`, install them without touching `package.json`:
+`npm run typecheck` runs TypeScript through npx; the first run needs network access and nothing is written to `node_modules`.
+
+Tests need `jiti`, `chalk`, the two host packages, and `@types/node` for the type check (it ships as a development dependency of the host packages, so it is not pulled in by the command above). On a fresh clone without `node_modules`, install them without touching `package.json`:
 
 ```bash
-npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk
+npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk @types/node
 ```
 
 Skip this step when `node_modules` already points at your Pi installation.
@@ -100,6 +103,7 @@ Skip this step when `node_modules` already points at your Pi installation.
 | `test/message-marks.test.ts` | `message-marks`: user messages, assistant and tool markers, colors, line width |
 | `test/editor-prefix.test.ts` | `message-marks`: input prefix, width, cursor |
 | `test/tool-run-groups.test.ts` | `tool-run-groups`: grouping, boundaries, summary text, expansion, clicks |
+| `test/integration.test.ts` | all three extensions together: gutter alignment and silent-turn visibility |
 
 ## License
 

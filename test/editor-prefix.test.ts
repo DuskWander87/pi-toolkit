@@ -7,18 +7,9 @@ import assert from "node:assert";
 import { getSelectListTheme, initTheme, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import { PromptPrefixEditor } from "../extensions/message-marks/index.ts";
+import { check, finish } from "./harness.ts";
 
 initTheme("dark", false);
-
-const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
-function check(name: string, fn: () => void) {
-	try {
-		fn();
-		results.push({ name, ok: true });
-	} catch (error) {
-		results.push({ name, ok: false, detail: (error as Error).message });
-	}
-}
 
 const tui = { terminal: { rows: 40 }, requestRender() {}, setFocus() {} } as unknown as TUI;
 const keybindings = { matches: () => false } as unknown as KeybindingsManager;
@@ -94,9 +85,4 @@ check("与默认输入框一致，工作状态嵌入上边框", () => {
 	assert.equal(editor.embedWorkingStatus, true);
 });
 
-const failed = results.filter((r) => !r.ok);
-for (const r of results) {
-	console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}${r.detail ? `\n      ${r.detail}` : ""}`);
-}
-console.log(`\n${results.length - failed.length}/${results.length} 通过`);
-process.exit(failed.length === 0 ? 0 : 1);
+finish();
