@@ -11,9 +11,10 @@
  * `Thought for Ns`；被中断或报错的轮次是硬边界。`edit` / `write` 行参与区间，但
  * 摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
- * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具段不折叠，保留带实时
- * 计时的工具行，`tool_execution_end` 后再合成摘要。有失败时只把计数片段标红
- * （`· 1 failed`），摘要正文保持 dim——一两个调用失败不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
+ * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具行不折叠，留在摘要
+ * 下方，保留命令行、流式输出与实时计时，`tool_execution_end` 后并入同一行。
+ * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
+ * 不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
  * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
  *
  * Pi 没有消息级的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -486,17 +487,22 @@ function isRegionStart(value: unknown): boolean {
 	return isToolSegment(value) || isSilentTurn(value);
 }
 
-/** 区间内还有执行中的工具段：保留 minimal-tools 的实时行与计时，不折叠。 */
-function hasRunningTool(items: readonly Component[]): boolean {
-	for (const item of items) {
-		if (!isToolSegment(item)) continue;
+/**
+ * 区间内第一个执行中的工具段的下标；整段都已结束时返回 `-1`。
+ *
+ * 执行中的工具行不进摘要：摘要行只有计数，看不到命令行、流式输出与实时计时；
+ * 留在摘要下方，两边的信息都保得住。
+ */
+function firstRunningIndex(items: readonly Component[]): number {
+	for (let index = 0; index < items.length; index++) {
+		const item = items[index];
 		if (item instanceof ToolRunGroup) {
-			if (item.stats().running) return true;
-		} else if ((item as ToolRow).isPartial) {
-			return true;
+			if (item.stats().running) return index;
+		} else if (isToolRow(item) && item.isPartial) {
+			return index;
 		}
 	}
-	return false;
+	return -1;
 }
 
 /**
@@ -522,9 +528,6 @@ function readRegion(children: readonly Component[], index: number): Region | und
 	const items: Component[] = [];
 	let cursor = index;
 	while (cursor < children.length && isAbsorbable(children[cursor])) items.push(children[cursor++]!);
-	if (countedSegments(items) === 0) return undefined;
-	// 执行中先留原行：摘要行只有计数，看不到命令与实时计时。
-	if (hasRunningTool(items)) return undefined;
 	return { items, end: cursor };
 }
 
@@ -539,6 +542,8 @@ function sameItems(left: readonly Component[], right: readonly Component[]): boo
  * 的回复留在区间外，它引发的调用仍并入同一行，所以一个请求只留一行摘要。
  * `edit` / `write` 行与报错或中断的轮次是硬边界。
  *
+ * 区间里已结束的部分先收进摘要行，执行中的工具行留在摘要下方——命令行、流式
+ * 输出与实时计时照常可见，执行结束后再由 `tool_execution_end` 并入同一行。
  * 已有的摘要会先拆回子组件再重新扫描，因此幂等；区间未变化时复用原实例，
  * 保留用户的折叠状态。
  */
@@ -563,13 +568,23 @@ export function groupSilentTurns(
 
 	const next: Component[] = [];
 	for (let index = 0; index < flat.length; index++) {
-	const region = readRegion(flat, index);
+		const region = readRegion(flat, index);
 		if (!region) {
 			next.push(flat[index]!);
 			continue;
 		}
 
-		const items = region.items;
+		// 执行中的工具段留在摘要外，已完成的部分先收成摘要行。
+		const runningAt = firstRunningIndex(region.items);
+		const absorbed = runningAt < 0 ? region.items : region.items.slice(0, runningAt);
+		const running = runningAt < 0 ? [] : region.items.slice(runningAt);
+		if (countedSegments(absorbed) === 0) {
+			// 还没有已完成的调用可摘要：整段保持原样，露出执行中的行。
+			next.push(...region.items);
+			index = region.end - 1;
+			continue;
+		}
+
 		const reused = previous.get(flat[index]!);
 		// 区间前那条带文本的回复留在外面，它的思考耗时仍计入这行摘要；
 		// 报错 / 中断的轮次是硬边界，保留自己的耗时标签。
@@ -580,12 +595,12 @@ export function groupSilentTurns(
 				: undefined;
 		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
 		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
-		if (reused && sameItems(reused.children, items)) {
+		if (reused && sameItems(reused.children, absorbed)) {
 			next.push(reused);
 		} else {
 			next.push(
 				new ToolRunSummary({
-					items,
+					items: absorbed,
 					expanded: reused?.expanded ?? mode.toolOutputExpanded === true,
 					theme: () => activeTheme,
 					requestRender: () => mode.ui?.requestRender?.(),
@@ -595,8 +610,9 @@ export function groupSilentTurns(
 			);
 		}
 		// 耗时已在摘要行里，收起与展开都不再重复区间内轮次与前置回复各自的标签。
-		clearAbsorbedThoughtLabels(items);
+		clearAbsorbedThoughtLabels(absorbed);
 		if (extraThought) clearThoughtLabel(extraThought);
+		next.push(...running);
 		index = region.end - 1;
 	}
 

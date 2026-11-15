@@ -7,6 +7,13 @@
 ![三次工具调用收起后只剩一行摘要](../../assets/tool-run-groups.png)
 
 <details>
+<summary>执行中：已完成部分收成摘要，正在跑的工具行留在摘要下方</summary>
+
+![执行中只多一条带实时计时的工具行](../../assets/tool-run-groups-running.png)
+
+</details>
+
+<details>
 <summary>展开后的时间线</summary>
 
 ![Ctrl+O 展开后逐条显示工具调用](../../assets/tool-run-groups-expanded.png)
@@ -24,8 +31,10 @@
   Thought for 1s, ran 1 read call
   ... (read 的路径与内容在展开后可见)
 
-执行中（工具行保持原样，带实时计时）
-● read · running (1.2s)
+执行中（已完成部分收成摘要，正在跑的工具行留在摘要下方）
+  Thought for 6s, ran 5 shell commands
+● $ npm test
+   shell · running (12.0s)
 
 有失败时
   Thought for 12s, ran 3 shell commands · 1 failed
@@ -50,7 +59,7 @@
 ### 不聚合的内容
 
 - 单轮内只有一条工具调用时第一级不聚合，由请求级摘要折叠成 `ran 1 read call`
-- 执行中的工具段不折叠：保留 `minimal-tools` 的实时行与计时，工具结束后由 `tool_execution_end` 触发一次重新扫描，合成摘要
+- 执行中的工具行不折叠：区间里已完成的部分先收成摘要行，执行中的工具行留在摘要下方，保留命令行、流式输出与实时计时；工具结束后由 `tool_execution_end` 触发一次重新扫描，并入同一行摘要
 - `edit` / `write` 始终逐条渲染；它们可以出现在折叠区间内，但不计入摘要
 - 被中断、报错或截断的轮次是硬边界
 - 用户消息是硬边界；请求开头那条带正文的回复留在区间外，作为摘要行的耗时来源
@@ -63,7 +72,7 @@
 | 收起，无思考耗时 | `ran 8 shell commands` |
 | 有失败 | 在末尾追加 ` · 1 failed`，只有这一段标红，摘要正文保持 dim |
 
-执行中的工具段不产生摘要，保持原行与实时计时；工具结束后才合成摘要。
+执行中的工具行不产生摘要，摘要只统计已结束的调用；它们保持原行与实时计时，工具结束后并入摘要行。
 
 工具名按首次出现顺序汇总，`bash` 显示为 `shell`：
 
@@ -100,7 +109,7 @@
 
 - 单独安装即可工作，Pi 内置工具行与 `minimal-tools` 渲染的工具行都能聚合
 - 与 `message-marks` 共用 2 列标记栏：摘要行缩进 2 列，但不由 `message-marks` 加圆点
-- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是两阶段渲染的完整内容；执行中的工具行按 `minimal-tools` 的实时行呈现，结束后才合成摘要行
+- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是两阶段渲染的完整内容；执行中的工具行按 `minimal-tools` 的实时行呈现，结束后并入摘要行
 
 ## 实现原理
 
@@ -115,14 +124,14 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 ## 限制
 
 - **依赖 `InteractiveMode` 私有成员**：`handleEvent`、`renderSessionItems`、`chatContainer`、`toolOutputExpanded` 都不是公开 API
-- **执行期间有一段过渡态**：工具段在执行中不折叠，于是从思考结束到工具跑完之间会同时看到 `Thought for Ns` 与带实时计时的工具行，工具结束后才收敛成一行摘要。实时计时与“从思考结束起就只有一行”不可兼得，当前选前者：长命令执行期间，命令行和计时比提前合并更有用
+- **执行期间比结束后多一行**：正在跑的工具行不进摘要，于是执行中看到的是「一行摘要 + 若干执行中的工具行」，工具跑完才收敛成一行摘要。实时计时与“执行期间也只有一行”不可兼得，当前选前者：长命令执行期间，命令行、输出和计时比提前合并更有用
 - **静默轮次判定依赖助手组件内部字段**：`markdownSlots` 与 `lastMessage.stopReason`；结构变化时退化到不合并，不会错误地藏起内容
 - **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，回放出来的摘要行与隐藏标签不带 `Thought for Ns`
 - **思考可见性同步只覆盖折叠区**：切换隐藏思考时会额外进入摘要与工具组，其他容器沿用 Pi 原本的处理
 
 ## 测试
 
-`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、执行中不折叠、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../README.md#测试)。
+`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、执行中只收已完成部分、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../README.md#测试)。
 
 ---
 

@@ -536,6 +536,130 @@ check("同一请求的工具段随轮次增长合入同一行摘要", () => {
 	);
 });
 
+check("执行中：已完成部分收成摘要，执行中的工具行留在摘要下方", () => {
+	const running = bashRow("c3", "sleep 5");
+	const mode = fakeMode([
+		assistantRow({ thinking: "先看目录" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		running,
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 1500 });
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(summaries[0]!.children.includes(running), false, "执行中的行不进入摘要");
+	assert.equal(mode.chatContainer.children.length, 2);
+	assert.equal(mode.chatContainer.children[1], running, "执行中的行紧跟在摘要下方");
+	assert.equal(
+		plain(summaries[0]!.render(WIDTH))[1]!.trimStart(),
+		"Thought for 3s, ran 2 shell commands",
+	);
+});
+
+check("执行中重扫不拆散已有摘要，展开状态跟到新实例", () => {
+	const mode = fakeMode([assistantRow({}), finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	summariesOf(mode)[0]!.setExpanded(true);
+
+	const running = bashRow("c3", "npm test");
+	mode.chatContainer.addChild(assistantRow({}));
+	mode.chatContainer.addChild(running);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const rebuilt = summariesOf(mode);
+	assert.equal(rebuilt.length, 1, "摘要不应被拆回组与散行");
+	assert.equal(rebuilt[0]!.expanded, true, "重建后保留展开状态");
+	assert.equal(rebuilt[0]!.children.includes(running), false);
+
+	groupSilentTurns(mode);
+	assert.equal(summariesOf(mode)[0], rebuilt[0], "区间未变化时复用实例");
+});
+
+check("区间里还没有已完成的调用时，执行中的工具行保持原样", () => {
+	const running = bashRow("c1", "npm test");
+	const mode = fakeMode([assistantRow({}), running]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 0);
+	assert.equal(mode.chatContainer.children[1], running);
+});
+
+check("执行中的改动行留在摘要之外，摘要只覆盖已完成部分", () => {
+	const edit = toolRow("edit", "e1", { path: "a.ts" });
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		edit,
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(mode.chatContainer.children.includes(edit), true);
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+});
+
+check("并行调用中先结束的调用留在摘要外，全部结束后并入", () => {
+	const slow = bashRow("c3", "sleep 5");
+	const fast = bashRow("c4", "ls");
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		slow,
+		fast,
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(mode.chatContainer.children.length, 3, "摘要 + 两条执行中的行");
+
+	finish(fast);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(summariesOf(mode).length, 1);
+	assert.equal(mode.chatContainer.children.length, 3, "还有调用在执行时保持原样");
+
+	finish(slow);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	assert.equal(mode.chatContainer.children.length, 1);
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+});
+
+check("工具结束后并入同一行摘要", () => {
+	const running = bashRow("c3", "npm test");
+	const mode = fakeMode([
+		assistantRow({}),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({}),
+		running,
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	finish(running);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(mode.chatContainer.children.length, 1);
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 3 shell commands");
+});
+
 check("带正文的轮次并入同一区间，正文在收起态可见", () => {
 	const mode = fakeMode([
 		assistantRow({ thinking: "a" }),
