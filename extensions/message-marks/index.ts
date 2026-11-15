@@ -240,10 +240,15 @@ function assistantMarker(): string {
 	return getSelectListTheme().description(MARKER);
 }
 
+/** 成功状态的圆点：主题没有蓝色令牌，取固定蓝。 */
+function successMarker(): string {
+	return activeTheme ? activeTheme.style(MARKER, { fg: SUCCESS_MARKER_COLOR }) : MARKER;
+}
+
 /** 工具行首圆点，颜色随执行状态：进行中与成功蓝，失败红。 */
 function toolMarker(component: ToolInternals): string {
 	if (component.result?.isError) return activeTheme?.fg("error", MARKER) ?? MARKER;
-	return activeTheme ? activeTheme.style(MARKER, { fg: SUCCESS_MARKER_COLOR }) : MARKER;
+	return successMarker();
 }
 
 /**
@@ -295,20 +300,46 @@ export function installAssistantMarks(component: typeof AssistantMessageComponen
 	};
 }
 
-/** 接管 ToolExecutionComponent 的渲染：整块对齐到标记栏，首行加状态圆点。 */
-export function installToolMarks(component: typeof ToolExecutionComponent = ToolExecutionComponent): void {
-	const prototype = component.prototype as unknown as ToolInternals & Record<PropertyKey, unknown>;
-	const render = (prototype[ORIGINAL_TOOL] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (this: ToolInternals, width: number): string[] {
+interface MarkerGutterOptions {
+	/** 保存原始 `render` 的键，同组件重复安装不会叠加。 */
+	symbol: symbol;
+	/** 首行圆点，可读取组件自身状态。 */
+	marker: (component: PatchedPrototype) => string;
+	/** 渲染前剥掉背景色（Box 自己铺满的背景）。 */
+	stripBackground?: boolean;
+}
+
+/**
+ * 接管组件的渲染：整块对齐到标记栏，首个内容行加圆点。
+ *
+ * 补缩进后仍超宽的行（满宽边框、自带留白的 Box）截回渲染宽度，
+ * 否则 Pi 会因超宽行抛错。
+ */
+function installMarkerGutter(component: { prototype: object }, options: MarkerGutterOptions): void {
+	const { symbol, marker: resolveMarker, stripBackground } = options;
+	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
+	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
+	prototype.render = function (this: PatchedPrototype, width: number): string[] {
 		const lines = render.call(this, width);
-		const marker = toolMarker(this);
+		const marker = resolveMarker(this);
 		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
-			const guttered = source.map((line) => gutterLine(line));
+			const guttered = source.map((line) => {
+				const aligned = gutterLine(stripBackground ? line.replace(BACKGROUND_SEQUENCE, "") : line);
+				return visibleWidth(aligned) > width ? truncateToWidth(aligned, width, "") : aligned;
+			});
 			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
 			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
 			return guttered;
 		});
 	};
+}
+
+/** 接管 ToolExecutionComponent 的渲染：整块对齐到标记栏，首行加状态圆点。 */
+export function installToolMarks(component: typeof ToolExecutionComponent = ToolExecutionComponent): void {
+	installMarkerGutter(component, {
+		symbol: ORIGINAL_TOOL,
+		marker: (target) => toolMarker(target as unknown as ToolInternals),
+	});
 }
 
 /**
@@ -338,21 +369,11 @@ export function installGutter(component: { prototype: object }, symbol: symbol):
 export function installSkillMark(
 	component: typeof SkillInvocationMessageComponent = SkillInvocationMessageComponent,
 ): void {
-	const prototype = component.prototype as unknown as PatchedPrototype & Record<PropertyKey, unknown>;
-	const render = (prototype[ORIGINAL_SKILL] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (this: PatchedPrototype, width: number): string[] {
-		const lines = render.call(this, width);
-		const marker = activeTheme ? activeTheme.style(MARKER, { fg: SUCCESS_MARKER_COLOR }) : MARKER;
-		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
-			const guttered = source.map((line) => {
-				const aligned = gutterLine(line.replace(BACKGROUND_SEQUENCE, ""));
-				return visibleWidth(aligned) > width ? truncateToWidth(aligned, width, "") : aligned;
-			});
-			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
-			if (row !== -1) guttered[row] = markLine(guttered[row]!, marker);
-			return guttered;
-		});
-	};
+	installMarkerGutter(component, {
+		symbol: ORIGINAL_SKILL,
+		marker: () => successMarker(),
+		stripBackground: true,
+	});
 }
 
 /** 一次安装消息、工具与系统类组件的左缘对齐。 */
