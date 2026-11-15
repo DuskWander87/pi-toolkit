@@ -155,16 +155,15 @@ export function gutterLine(line: string): string {
  * 块间距 = 上一块的尾随空行 + Pi 的 `Spacer(1)` + 本块的首行留白，两者叠加会出现
  * 2–3 行空隙。这里去掉尾随空行；`leadingBlanks` 是本块应保留的首行空行数：
  * 跟在 `Spacer(1)` 后面的块（用户消息、技能调用、压缩/分支摘要）为 0，其余为 1，
- * 于是相邻块的间距统一为 1 行。
+ * 于是相邻块的间距统一为 1 行。终端图片行及其占位空行属于图片自身的高度，
+ * 不算块留白（见 `contentStart`）。
  */
 export function normalizeBlockSpacing(lines: string[], leadingBlanks: 0 | 1): string[] {
 	if (lines.length === 0) return lines;
-	let firstContent = 0;
-	while (firstContent < lines.length && isBlankLine(lines[firstContent]!)) firstContent++;
-	let lastContent = lines.length - 1;
-	while (lastContent >= 0 && isBlankLine(lines[lastContent]!)) lastContent--;
-	// 整块都是空行：没有可对齐的内容，原样返回。
-	if (lastContent < 0) return lines;
+	const firstContent = contentStart(lines);
+	const lastContent = contentEnd(lines);
+	// 整块都是空行，或首/尾挨着终端图片：没有可收敛的块留白，原样返回。
+	if (firstContent < 0 || lastContent < 0) return lines;
 	const start = Math.max(0, firstContent - leadingBlanks);
 	const end = lastContent + 1;
 	if (start === 0 && end === lines.length) return lines;
@@ -172,6 +171,30 @@ export function normalizeBlockSpacing(lines: string[], leadingBlanks: 0 | 1): st
 	if (start > 0) kept[0] = carrySequences(lines.slice(0, start)) + kept[0];
 	if (end < lines.length) kept[kept.length - 1] = kept[kept.length - 1]! + carrySequences(lines.slice(end));
 	return kept;
+}
+
+/**
+ * 首个内容行的行号；整块都是空行、或空行后面紧接终端图片时返回 -1。
+ *
+ * 图片（Kitty / iTerm2 协议）的行里没有可见字符，`isBlankLine` 认不出来；
+ * 它的序列行与相邻空行又是一个整体（序列行之后或之前的空行就是图片高度），
+ * 删任何一行都会让图片压到相邻内容上，所以这一侧不收敛。
+ */
+function contentStart(lines: readonly string[]): number {
+	for (let i = 0; i < lines.length; i++) {
+		if (IMAGE_LINE.test(lines[i]!)) return -1;
+		if (!isBlankLine(lines[i]!)) return i;
+	}
+	return -1;
+}
+
+/** 最后一个内容行的行号；规则同 `contentStart`，从尾部往前扫。 */
+function contentEnd(lines: readonly string[]): number {
+	for (let i = lines.length - 1; i >= 0; i--) {
+		if (IMAGE_LINE.test(lines[i]!)) return -1;
+		if (!isBlankLine(lines[i]!)) return i;
+	}
+	return -1;
 }
 
 /** 被删掉空行上的控制码（如 OSC 133 分区标记），保持原有顺序拼回相邻行。 */

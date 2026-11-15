@@ -16,7 +16,7 @@ import {
 	getMarkdownTheme,
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Spacer, Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, stripTerminalSequences, setCapabilityOverrides, visibleWidth } from "@earendil-works/pi-tui";
 import extend, {
 	SUCCESS_MARKER_COLOR,
 	installAssistantMarks,
@@ -549,6 +549,28 @@ check("助手、技能、用户相邻块之间恰好 1 行空行", () => {
 		if (start > 0) gaps.push(row - start);
 	}
 	assert.deepEqual(gaps, [1, 1, 1], visible.join("\n"));
+});
+
+/** 1×1 PNG：让 `Image` 组件渲染出真正的终端图片行。 */
+const PNG_1X1 =
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/wF/9HkAAAAASUVORK5CYII=";
+
+check("工具块里的终端图片行与它占的高度不算块留白", () => {
+	for (const images of ["kitty", "iterm2"] as const) {
+		setCapabilityOverrides({ images });
+		try {
+			const lines = toolLines({ content: [{ type: "image", data: PNG_1X1, mimeType: "image/png" }], isError: false });
+			const row = lines.findIndex((line) =>
+				images === "kitty" ? line.includes("\x1b_G") : line.includes("\x1b]1337;File="),
+			);
+			assert.ok(row !== -1, `${images}：图片序列被当成空行删掉\n${plain(lines).join("\n")}`);
+			// Kitty 把占位空行放在序列行之后，iTerm2 放在之前：图片高度必须留下
+			const padding = images === "kitty" ? lines[row + 1] : lines[row - 1];
+			assert.ok(padding !== undefined && isBlank(padding), `${images}：图片占位行被删掉\n${plain(lines).join("\n")}`);
+		} finally {
+			setCapabilityOverrides({});
+		}
+	}
 });
 
 finish();
