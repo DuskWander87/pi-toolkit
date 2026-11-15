@@ -488,21 +488,13 @@ function isRegionStart(value: unknown): boolean {
 }
 
 /**
- * 区间内第一个执行中的工具段的下标；整段都已结束时返回 `-1`。
- *
- * 执行中的工具行不进摘要：摘要行只有计数，看不到命令行、流式输出与实时计时；
- * 留在摘要下方，两边的信息都保得住。
+ * 执行中的工具段：不进摘要，留在摘要下方——摘要行只有计数，看不到命令行、
+ * 流式输出与实时计时。并行调用里已结束的部分照常计入，执行期间最多只多出
+ * 正在跑的那几行。
  */
-function firstRunningIndex(items: readonly Component[]): number {
-	for (let index = 0; index < items.length; index++) {
-		const item = items[index];
-		if (item instanceof ToolRunGroup) {
-			if (item.stats().running) return index;
-		} else if (isToolRow(item) && item.isPartial) {
-			return index;
-		}
-	}
-	return -1;
+function isRunningSegment(item: Component): boolean {
+	if (item instanceof ToolRunGroup) return item.stats().running;
+	return isToolRow(item) && item.isPartial === true;
 }
 
 /**
@@ -542,8 +534,9 @@ function sameItems(left: readonly Component[], right: readonly Component[]): boo
  * 的回复留在区间外，它引发的调用仍并入同一行，所以一个请求只留一行摘要。
  * `edit` / `write` 行与报错或中断的轮次是硬边界。
  *
- * 区间里已结束的部分先收进摘要行，执行中的工具行留在摘要下方——命令行、流式
- * 输出与实时计时照常可见，执行结束后再由 `tool_execution_end` 并入同一行。
+ * 区间里已结束的部分（含并行调用中先结束的）收进摘要行，执行中的工具行留在
+ * 摘要下方——命令行、流式输出与实时计时照常可见，执行结束后再由
+ * `tool_execution_end` 并入同一行。
  * 已有的摘要会先拆回子组件再重新扫描，因此幂等；区间未变化时复用原实例，
  * 保留用户的折叠状态。
  */
@@ -574,10 +567,9 @@ export function groupSilentTurns(
 			continue;
 		}
 
-		// 执行中的工具段留在摘要外，已完成的部分先收成摘要行。
-		const runningAt = firstRunningIndex(region.items);
-		const absorbed = runningAt < 0 ? region.items : region.items.slice(0, runningAt);
-		const running = runningAt < 0 ? [] : region.items.slice(runningAt);
+		// 执行中的工具段留在摘要外，其余项（含并行调用里先结束的）一并收成摘要行。
+		const absorbed = region.items.filter((item) => !isRunningSegment(item));
+		const running = region.items.filter(isRunningSegment);
 		if (countedSegments(absorbed) === 0) {
 			// 还没有已完成的调用可摘要：整段保持原样，露出执行中的行。
 			next.push(...region.items);

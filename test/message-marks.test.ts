@@ -14,7 +14,6 @@ import {
 	ToolExecutionComponent,
 	UserMessageComponent,
 	getMarkdownTheme,
-	getSelectListTheme,
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Text, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
@@ -284,9 +283,9 @@ check("工具行首圆点失败为红色", () => {
 	assert.ok(lines[row]!.includes(marker), JSON.stringify(plain(lines)[row]));
 });
 
-check("运行中的工具行首圆点为灰色", () => {
+check("运行中的工具行首圆点与成功同为蓝色", () => {
 	const lines = toolLines();
-	const marker = getSelectListTheme().description("●");
+	const marker = testTheme.style("●", { fg: SUCCESS_MARKER_COLOR });
 	const row = lines.findIndex((line) => stripTerminalSequences(line).includes("●"));
 	assert.ok(row !== -1, JSON.stringify(plain(lines)));
 	assert.ok(lines[row]!.includes(marker), JSON.stringify(plain(lines)[row]));

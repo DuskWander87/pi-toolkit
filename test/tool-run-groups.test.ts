@@ -608,7 +608,7 @@ check("执行中的改动行留在摘要之外，摘要只覆盖已完成部分"
 	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
 });
 
-check("并行调用中先结束的调用留在摘要外，全部结束后并入", () => {
+check("并行调用中先结束的调用并入摘要，仍在执行的留在下方", () => {
 	const slow = bashRow("c3", "sleep 5");
 	const fast = bashRow("c4", "ls");
 	const mode = fakeMode([
@@ -628,8 +628,16 @@ check("并行调用中先结束的调用留在摘要外，全部结束后并入"
 	finish(fast);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
-	assert.equal(summariesOf(mode).length, 1);
-	assert.equal(mode.chatContainer.children.length, 3, "还有调用在执行时保持原样");
+	const summaries = summariesOf(mode);
+	assert.equal(summaries.length, 1);
+	assert.equal(
+		plain(summaries[0]!.render(WIDTH))[1]!.trimStart(),
+		"ran 3 shell commands",
+		"先结束的调用计入摘要",
+	);
+	assert.equal(summaries[0]!.children.includes(fast), true);
+	assert.equal(summaries[0]!.children.includes(slow), false);
+	assert.deepEqual(mode.chatContainer.children, [summaries[0], slow], "仍在执行的跟在摘要下方");
 
 	finish(slow);
 	groupToolRuns(mode);

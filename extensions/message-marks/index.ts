@@ -4,7 +4,7 @@
  * Claude Code 式左侧标记栏（2 列）：
  * - 用户消息首行前加 `› `，其余行缩进对齐，便于区分用户输入与模型输出
  * - 助手消息首个文本块首行前加 `● `，其余行（含思考块）对齐到第 2 列
- * - 工具调用首行前加 `● `（进行中灰、成功蓝、失败红），整块对齐到第 2 列
+ * - 工具调用首行前加 `● `（进行中与成功蓝、失败红），整块对齐到第 2 列
  * - 输入框首行以 `› ` 起头，多行输入在等宽空白后对齐
  *
  * Pi 未暴露普通消息的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
@@ -239,9 +239,8 @@ function assistantMarker(): string {
 	return getSelectListTheme().description(MARKER);
 }
 
-/** 工具行首圆点，颜色随执行状态：进行中灰、失败红、成功蓝。 */
+/** 工具行首圆点，颜色随执行状态：进行中与成功蓝，失败红。 */
 function toolMarker(component: ToolInternals): string {
-	if (component.isPartial) return getSelectListTheme().description(MARKER);
 	if (component.result?.isError) return activeTheme?.fg("error", MARKER) ?? MARKER;
 	return activeTheme ? activeTheme.style(MARKER, { fg: SUCCESS_MARKER_COLOR }) : MARKER;
 }
