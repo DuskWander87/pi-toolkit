@@ -124,7 +124,9 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 - **依赖 `InteractiveMode` 私有成员**：`handleEvent`、`renderSessionItems`、`chatContainer`、`toolOutputExpanded` 都不是公开 API
 - **执行期间会多出正在跑的工具行**：正在跑的工具行不进摘要，于是执行中看到的是「一行摘要 + 正在跑的工具行」，工具跑完才收敛成一行摘要。实时计时与“执行期间也只有一行”不可兼得，当前选前者：长命令执行期间，命令行、输出和计时比提前合并更有用
 - **静默轮次判定依赖助手组件内部字段**：`markdownSlots` 与 `lastMessage.stopReason`；结构变化时退化到不合并，不会错误地藏起内容
-- **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，回放出来的摘要行与隐藏标签不带 `Thought for Ns`
+- **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，只存在内存里；任何按 session entry 重建视图的路径（`-r` / `-c`、`/tree` 跳分支、`/reload`、切换 cache miss 提示）都会换了一批新组件，摘要行与隐藏标签不带 `Thought for Ns`，收起态也就看不到那一轮思考过的痕迹。Pi 不持久化思考耗时（`AssistantMessage` 里没有耗时字段），要补上有两条路：
+  - **无耗时标记**：`thoughtMs` 缺失但该轮有思考内容时，摘要行写成 `Thought, ran 2 shell commands`，不编造秒数，也不改会话数据
+  - **持久化耗时**：`message_end` 时用 `appendEntry` 把每轮耗时写进 session（不进 LLM 上下文；未注册 entry renderer 时不渲染），回放时按 `responseId` 配对填回，缺失该字段时回退到相邻顺序；代价是会话文件每轮多一条记录，并多一份跨 Pi 版本的私有数据契约
 - **思考可见性同步只覆盖摘要与工具组**：收起时由摘要行管理思考正文（含区间前那条回复），展开时按 Pi 的设置显示；其他容器沿用 Pi 原本的处理
 
 ## 测试
