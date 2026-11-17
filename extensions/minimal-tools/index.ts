@@ -31,6 +31,10 @@ const MAX_COMMAND_CHARS = 100;
 const EDIT_DIFF_MAX_LINES = 30;
 /** 默认展示的写入内容预览行数。 */
 const WRITE_PREVIEW_MAX_LINES = 10;
+/** 收起态单行折行的行数上限，避免超长单行把折叠区撑成上千行；展开后不设上限。 */
+const WRAP_MAX_ROWS = 20;
+/** 折行时留给内容的最小列宽，保证一个宽字符能完整落在行内。 */
+const WRAP_MIN_CONTENT_WIDTH = 2;
 /** 运行中计时的重绘间隔，与 Pi 内置工具计时一致。 */
 const TIMER_REFRESH_MS = 1000;
 
@@ -183,16 +187,26 @@ interface DiffLine {
 }
 
 /** 拆出行首标记与行号，格式同 Pi 的 diff：`-16 内容`。 */
+/** 解析一行 diff；行号栏拆成 prefix，正文单独存放，折行时续行才能与内容列对齐。 */
 function parseDiffLine(line: string): DiffLine {
 	const match = /^([+-])(\s*\d*)\s(.*)$/.exec(line);
-	if (!match) {
-		return { kind: "context", prefix: "", content: line };
+	if (match) {
+		return {
+			kind: match[1] === "+" ? "add" : "remove",
+			prefix: line.slice(0, line.length - match[3].length),
+			content: match[3],
+		};
 	}
-	return {
-		kind: match[1] === "+" ? "add" : "remove",
-		prefix: line.slice(0, line.length - match[3].length),
-		content: match[3],
-	};
+	// context 行以空格起头（如 ` 12 code`），同样拆出行号栏；无行号时保持整行作正文。
+	const context = /^(\s+\d*)\s(.*)$/.exec(line);
+	if (context) {
+		return {
+			kind: "context",
+			prefix: line.slice(0, line.length - context[2].length),
+			content: context[2],
+		};
+	}
+	return { kind: "context", prefix: "", content: line };
 }
 
 interface Token {
@@ -336,19 +350,83 @@ function buildDiffLines(lines: string[]): DiffLine[] {
 	return result;
 }
 
+/**
+ * 按显示宽度切分内容，返回字符区间；宽字符不跨段。
+ *
+ * 优先在空白与中日韩字符处断行（代码与英文句子不被劈开）；一段里没有可断点时硬切。
+ * 首段行首的缩进不当作断点，避免续行被顶到行首。
+ * `maxSegments` 用尽即停，`truncated` 表示后面还有未切出的内容。
+ */
+function wrapSegments(
+	content: string,
+	width: number,
+	maxSegments = Number.POSITIVE_INFINITY,
+): { segments: Array<[number, number]>; truncated: boolean } {
+	const segments: Array<[number, number]> = [];
+	let start = 0;
+	while (start < content.length) {
+		if (segments.length >= maxSegments) return { segments, truncated: true };
+		let used = 0;
+		let cursor = start;
+		let breakAt = -1;
+		let sawText = false;
+		for (const char of content.slice(start)) {
+			const charWidth = visibleWidth(char);
+			if (used + charWidth > width) break;
+			used += charWidth;
+			cursor += char.length;
+			// 中日韩字符可在字符间断行；西文只在空白处断，避免劈开单词。
+			if (/\s/.test(char) || charWidth >= 2) {
+				if (sawText) breakAt = cursor;
+			} else {
+				sawText = true;
+			}
+		}
+		if (cursor >= content.length) {
+			segments.push([start, content.length]);
+			break;
+		}
+		// 单个字符就超出宽度：独占一段，保证不丢字符也不死循环。
+		if (cursor === start) cursor = start + (content.codePointAt(start)! > 0xffff ? 2 : 1);
+		const end = breakAt > start ? breakAt : cursor;
+		segments.push([start, end]);
+		start = end;
+	}
+	return { segments: segments.length > 0 ? segments : [[0, 0]], truncated: false };
+}
+
+/** 把整行的词级变化区间裁到当前片段，并换算成片段内偏移。 */
+function clipRanges(
+	ranges: Array<[number, number]> | undefined,
+	start: number,
+	end: number,
+): Array<[number, number]> {
+	if (!ranges) return [];
+	const clipped: Array<[number, number]> = [];
+	for (const [from, to] of ranges) {
+		const low = Math.max(from, start);
+		const high = Math.min(to, end);
+		if (high > low) clipped.push([low - start, high - start]);
+	}
+	return clipped;
+}
+
 /** diff 正文：整行铺满宽度的行级底色，变化片段再叠一层更亮的底色。 */
 class DiffLines implements Component {
-	/** 同宽度重复渲染时直接复用，避免每帧重跑颜色与截断。 */
+	/** 同宽度重复渲染时直接复用，避免每帧重跑颜色与换行。 */
 	private cache?: { width: number; lines: string[] };
 
 	constructor(
 		private readonly lines: DiffLine[],
 		private readonly theme: RenderTheme,
+		/** 单行折行上限；undefined 表示不限（展开态）。 */
+		private readonly maxWrapRows?: number,
 	) {}
 
 	render(width: number): string[] {
 		if (this.cache?.width === width) return this.cache.lines;
-		const lines = this.lines.map((line) => this.renderLine(line, width));
+		const lines: string[] = [];
+		for (const line of this.lines) lines.push(...this.renderLine(line, width));
 		this.cache = { width, lines };
 		return lines;
 	}
@@ -357,36 +435,65 @@ class DiffLines implements Component {
 		this.cache = undefined;
 	}
 
-	private renderLine(line: DiffLine, width: number): string {
+	/** 超宽行按显示宽度折成多段：行号列只在首段，续行用等宽空白对齐。 */
+	private renderLine(line: DiffLine, width: number): string[] {
+		// 一列行号栏加一个宽字符都放不下时，退回收起前的一行截断，保证不越过 width。
+		if (width <= 0) return [""];
+		if (width < WRAP_MIN_CONTENT_WIDTH) return [truncateToWidth(line.prefix + line.content, width, "")];
+		const prefixWidth = Math.min(visibleWidth(line.prefix), width - WRAP_MIN_CONTENT_WIDTH);
+		const head = truncateToWidth(line.prefix, prefixWidth, "");
+		const continuation = " ".repeat(prefixWidth);
+		const contentWidth = width - prefixWidth;
+		const { segments, truncated } = wrapSegments(line.content, contentWidth, this.maxWrapRows ?? Number.POSITIVE_INFINITY);
+		return segments.map(([start, end], index) =>
+			this.renderSegment(
+				line,
+				width,
+				index === 0 ? head : continuation,
+				start,
+				end,
+				truncated && index === segments.length - 1,
+			),
+		);
+	}
+
+	/** 一段 diff：底色铺满整行，片段内的变化区间再叠一层更亮的底色。 */
+	private renderSegment(
+		line: DiffLine,
+		width: number,
+		head: string,
+		start: number,
+		end: number,
+		/** 折行被上限截断的末段：留一列收口省略号。 */
+		ellipsis = false,
+	): string {
 		const theme = this.theme;
-		const raw = line.prefix + line.content;
-		// 一行 diff 对应一行渲染：超出宽度直接截断，背景仍铺满整行。
-		const text = visibleWidth(raw) > width ? truncateToWidth(raw, width, "") : raw;
-		const prefix = text.slice(0, Math.min(line.prefix.length, text.length));
-		const content = text.slice(prefix.length);
-		const padding = " ".repeat(Math.max(0, width - visibleWidth(text)));
+		const raw = line.content.slice(start, end);
+		const text = ellipsis
+			? `${truncateToWidth(raw, Math.max(0, width - visibleWidth(head) - 1), "")}…`
+			: raw;
+		const padding = " ".repeat(Math.max(0, width - visibleWidth(head) - visibleWidth(text)));
 		if (line.kind === "context") {
-			return theme.fg("toolDiffContext", text + padding);
+			return theme.fg("toolDiffContext", head + text + padding);
 		}
 		const fg = line.kind === "add" ? "toolDiffAdded" : "toolDiffRemoved";
 		const palette = theme.appearance === "light" ? LIGHT_DIFF_PALETTE : DARK_DIFF_PALETTE;
 		const bg = line.kind === "add" ? palette.added : palette.removed;
 		const highlightBg = line.kind === "add" ? palette.addedHighlight : palette.removedHighlight;
-		if (!line.changed) {
-			return theme.style(text + padding, { fg, bg });
+		const changed = clipRanges(line.changed, start, end);
+		if (changed.length === 0) {
+			return theme.style(head + text + padding, { fg, bg });
 		}
 		const parts: string[] = [];
-		if (prefix) parts.push(theme.style(prefix, { fg, bg }));
+		if (head) parts.push(theme.style(head, { fg, bg }));
 		let cursor = 0;
-		for (const [start, end] of line.changed) {
-			if (start >= content.length) break;
-			const stop = Math.min(end, content.length);
-			const before = content.slice(cursor, start);
-			if (before) parts.push(theme.style(before, { fg, bg }));
-			if (stop > start) parts.push(theme.style(content.slice(start, stop), { fg, bg: highlightBg }));
-			cursor = stop;
+		for (const [from, to] of changed) {
+			if (from >= text.length) break;
+			if (from > cursor) parts.push(theme.style(text.slice(cursor, from), { fg, bg }));
+			parts.push(theme.style(text.slice(from, to), { fg, bg: highlightBg }));
+			cursor = to;
 		}
-		const tail = content.slice(cursor) + padding;
+		const tail = text.slice(cursor) + padding;
 		if (tail) parts.push(theme.style(tail, { fg, bg }));
 		return parts.join("");
 	}
@@ -531,7 +638,7 @@ function renderResultText(
 
 /**
  * edit 结果渲染：标题 + 增删统计 + diff 正文。
- * diff 已在 Pi 的工具结果中算好，这里只负责配色与截断。
+ * diff 已在 Pi 的工具结果中算好，这里只负责配色与换行。
  */
 function renderEditResult(
 	result: { content: Array<{ type: string; text?: string }>; details?: { diff?: string } },
@@ -565,7 +672,7 @@ function renderEditResult(
 	const lines = trimTrailingEmpty(diff.split("\n"));
 	const limit = options.expanded ? lines.length : EDIT_DIFF_MAX_LINES;
 	const shown = lines.slice(0, limit);
-	box.addChild(new DiffLines(buildDiffLines(shown), theme));
+	box.addChild(new DiffLines(buildDiffLines(shown), theme, options.expanded ? undefined : WRAP_MAX_ROWS));
 	if (shown.length < lines.length) {
 		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));
 	}
@@ -601,7 +708,7 @@ function renderWriteResult(
 	const limit = options.expanded ? lines.length : WRITE_PREVIEW_MAX_LINES;
 	const shown = lines.slice(0, limit).map((content): DiffLine => ({ kind: "add", prefix: "+ ", content }));
 	if (shown.length > 0) {
-		box.addChild(new DiffLines(shown, theme));
+		box.addChild(new DiffLines(shown, theme, options.expanded ? undefined : WRAP_MAX_ROWS));
 	}
 	if (shown.length < lines.length) {
 		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));

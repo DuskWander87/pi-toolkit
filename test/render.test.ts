@@ -431,7 +431,7 @@ check("outputPad=0 时展开块不额外缩进", () => {
 	assert.ok(lines[0]!.startsWith("$ ls"), JSON.stringify(lines[0]));
 });
 
-check("diff 长行截断到渲染宽度", () => {
+check("diff 长行折行后单行仍不超宽", () => {
 	const edit = renderers("edit");
 	const diff = `+1 ${"x".repeat(120)}`;
 	const component = edit.renderResult(
@@ -443,6 +443,132 @@ check("diff 长行截断到渲染宽度", () => {
 	for (const line of component.render(40)) {
 		assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}: ${JSON.stringify(stripTerminalSequences(line))}`);
 	}
+});
+
+check("diff 超宽行折成多行，内容完整且续行对齐行号列", () => {
+	const edit = renderers("edit");
+	const diff = `+127 ${"x".repeat(120)}END`;
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	const lines = component.render(40).map((line: string) => line.replace(/\s+$/, ""));
+	const rows = lines.filter((line: string) => line.includes("x"));
+	assert.ok(rows.length > 1, `长行应折成多行：${JSON.stringify(rows)}`);
+	assert.ok(rows[0]!.trimStart().startsWith("+127 "), JSON.stringify(rows[0]));
+	assert.equal(rows[1]!.indexOf("x"), rows[0]!.indexOf("x"), "续行应与首段内容列对齐");
+	const body = lines.join("").replace(/\s+/g, "");
+	assert.ok(body.includes(`${"x".repeat(120)}END`), "折行后不得丢字符");
+});
+
+check("diff 折行不劈开宽字符", () => {
+	const edit = renderers("edit");
+	const content = "中".repeat(60);
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff: `+1 ${content}` } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	const lines = component.render(41).map((line: string) => line.replace(/\s+$/, ""));
+	for (const line of lines) assert.ok(visibleWidth(line) <= 41, `${visibleWidth(line)}`);
+	for (const row of lines.filter((line: string) => line.includes("中"))) {
+		assert.match(row.trim().replace(/^\+1 /, ""), /^中+$/, `每行只能是完整的宽字符：${JSON.stringify(row)}`);
+	}
+	assert.ok(lines.join("").replace(/\s+/g, "").includes(content), "宽字符不得被折行拆散");
+});
+
+check("折行宽度极窄时仍不越过渲染宽度", () => {
+	const edit = renderers("edit");
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff: `+1 ${"中".repeat(5)}` } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	// component 宽 3 时 DiffLines 只剩 1 列，覆盖退化为截断的分支；组件宽 1 时 Pi 自己的盒内边距就放不下，不在本组断言内。
+	for (const width of [2, 3, 4, 6]) {
+		for (const line of component.render(width)) {
+			assert.ok(visibleWidth(line) <= width, `width=${width} 渲染出 ${visibleWidth(line)} 列：${JSON.stringify(line)}`);
+		}
+	}
+});
+
+check("收起态单行折行有上限，末段以省略号收尾；展开后显示全文", () => {
+	const edit = renderers("edit");
+	const content = `${"w".repeat(60)} `.repeat(40);
+	const rows = (expanded: boolean) => {
+		const component = edit.renderResult(
+			{ content: [{ type: "text", text: "ok" }], details: { diff: `+1 ${content}` } },
+			{ expanded, isPartial: false },
+			theme,
+			ctx({ args: { path: "a.ts" } }),
+		);
+		return component.render(40).map((line: string) => line.replace(/\s+$/, ""));
+	};
+	const collapsed = rows(false).filter((line: string) => line.includes("w"));
+	assert.equal(collapsed.length, 20, `收起态单行应限在 20 行：${collapsed.length}`);
+	assert.ok(collapsed[19]!.endsWith("…"), JSON.stringify(collapsed[19]));
+	for (const line of collapsed) assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}`);
+	const expanded = rows(true).filter((line: string) => line.includes("w"));
+	assert.ok(expanded.length > 20, `展开后应显示全文：${expanded.length}`);
+	assert.ok(!expanded.some((line: string) => line.endsWith("…")), "展开后不应再接截止标记");
+	assert.ok(
+		expanded.join("").replace(/\s+/g, "").includes(content.replace(/\s+/g, "")),
+		"展开后不得丢字符",
+	);
+});
+
+check("diff 折行时 context 行的续行对齐内容列", () => {
+	const edit = renderers("edit");
+	const content = "const value = someFunction(alpha, beta, gamma, delta, epsilon, zeta);";
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff: ` 12 ${content}` } },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	const lines = component.render(40).map((line: string) => line.replace(/\s+$/, ""));
+	const rows = lines.filter((line: string) => /someFunction|alpha|beta|gamma|delta|epsilon|zeta/.test(line));
+	assert.ok(rows.length > 1, `context 长行应折成多行：${JSON.stringify(rows)}`);
+	assert.ok(rows[0]!.includes(" 12 "), JSON.stringify(rows[0]));
+	assert.equal(rows[1]!.search(/\S/), rows[0]!.indexOf("const"), "续行应与内容列对齐");
+	const body = lines.join("").replace(/\s+/g, "");
+	assert.ok(body.includes(content.replace(/\s+/g, "")), "折行后不得丢字符");
+});
+
+check("diff 折行后词级高亮仍落在变化片段上", () => {
+	const edit = renderers("edit");
+	const seen: Array<{ text: string; bg?: string }> = [];
+	const markTheme = {
+		appearance: "dark",
+		fg: (_name: string, value: string) => value,
+		bg: (_name: string, value: string) => value,
+		bold: (value: string) => value,
+		style(value: string, opts: { fg?: string; bg?: string }) {
+			seen.push({ text: value, bg: opts.bg });
+			return value;
+		},
+	};
+	const diff = `-1 ${"a".repeat(100)}OLD\n+1 ${"a".repeat(100)}NEW`;
+	const component = edit.renderResult(
+		{ content: [{ type: "text", text: "ok" }], details: { diff } },
+		{ expanded: false, isPartial: false },
+		markTheme,
+		ctx({ args: { path: "a.ts" } }),
+	);
+	const lines = component.render(40).map((line: string) => line.replace(/\s+$/, ""));
+	const body = lines.join("").replace(/\s+/g, "");
+	assert.ok(body.includes(`${"a".repeat(100)}OLD`), body);
+	assert.ok(body.includes(`${"a".repeat(100)}NEW`), body);
+	// 变化后缀单独成段且用更亮的底色；其余片段用行级底色。
+	const changed = seen.find((entry) => entry.text === "NEW");
+	assert.ok(changed, `变化片段应独立上色：${JSON.stringify(seen)}`);
+	const plain = seen.find((entry) => entry.text.includes("aaa"));
+	assert.ok(plain, "未变化片段应成段");
+	assert.notEqual(changed!.bg, plain!.bg, "变化片段应使用更亮的底色");
 });
 
 check("diff 中的 tab 展开为 3 个空格", () => {
@@ -499,6 +625,25 @@ check("write 展示写入预览：行数 + 超过 10 行截断提示", () => {
 	assert.ok(out.startsWith("write C:/tmp/b.ts"), out);
 	assert.ok(out.includes("└ Wrote 15 lines"), out);
 	assert.ok(out.includes("(5 more lines, ctrl+o to expand)"), out);
+});
+
+check("write 预览同样折行显示全文", () => {
+	const write = renderers("write");
+	const long = `const meta = { key: "value", another: "${"a".repeat(80)}" };`;
+	const component = write.renderResult(
+		{ content: [{ type: "text", text: "ok" }] },
+		{ expanded: false, isPartial: false },
+		theme,
+		ctx({ args: { path: "b.ts", content: long } }),
+	);
+	const lines = component.render(40).map((line: string) => line.replace(/\s+$/, ""));
+	for (const line of lines) assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}`);
+	const rows = lines.filter((line: string) => line.includes("aaa"));
+	assert.ok(rows.length > 1, `预览长行应折成多行：${JSON.stringify(rows)}`);
+	// 续行缩进 = 盒内边距 1 + `+ ` 前缀 2。
+	assert.equal(rows[1]!.length - rows[1]!.trimStart().length, 3, "续行应与内容列对齐");
+	const body = lines.join("").replace(/\s+/g, "");
+	assert.ok(body.includes("a".repeat(80)), "折行后不得丢字符");
 });
 
 // ---------------------------------------------------------------- 14. 中断
