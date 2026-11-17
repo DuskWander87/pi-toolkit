@@ -11,6 +11,10 @@
  * `Thought for Ns`；被中断或报错的轮次是硬边界。`edit` / `write` 行参与区间，但
  * 摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
+ * 收起时思考正文不占行：摘要行已经统计过耗时，区间内的轮次与区间前那条带正文的
+ * 回复都只留正文；展开后显示思考正文，Pi 的 `hideThinkingBlock` 为 `true` 时这些
+ * 轮次不显示任何思考内容（耗时只在摘要行上）。
+ *
  * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具行不折叠，留在摘要
  * 下方，保留命令行、流式输出与实时计时，`tool_execution_end` 后并入同一行。
  * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
@@ -69,6 +73,7 @@ interface AssistantInternals extends Component {
 	markdownSlots?: Array<{ kind: string }>;
 	lastMessage?: { stopReason?: string };
 	hiddenThinkingLabel?: string;
+	hideThinkingBlock?: boolean;
 	setHiddenThinkingLabel?(label: string): void;
 	setHideThinkingBlock?(hide: boolean): void;
 }
@@ -142,6 +147,18 @@ export function thoughtLabel(thoughtMs: number, theme?: Theme): string {
 /** 把一条已结束消息的隐藏思考标签换成实际耗时。 */
 export function applyThoughtLabel(assistant: Component, thoughtMs: number): void {
 	(assistant as AssistantInternals).setHiddenThinkingLabel?.(thoughtLabel(thoughtMs, activeTheme));
+}
+
+/**
+ * 收起或 Pi 隐藏思考时，正文照常、思考不参与渲染。
+ *
+ * `setHideThinkingBlock` 会清空逐段点击的临时开关，因此值未变时不动它。
+ */
+function setThinkingHidden(value: unknown, hidden: boolean): void {
+	if (!(value instanceof AssistantMessageComponent)) return;
+	const internals = value as unknown as AssistantInternals;
+	if (internals.hideThinkingBlock === hidden) return;
+	internals.setHideThinkingBlock?.(hidden);
 }
 
 /** 摘要行已经展示这段耗时，隐藏消息自己的标签，避免同一段思考显示两行。 */
@@ -254,7 +271,6 @@ export class ToolRunGroup extends Container {
 			this.requestRender();
 			return { handled: true } as MouseDispatchResult;
 		}
-		if (!this.expandedState) return undefined;
 		return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
 	}
 
@@ -329,13 +345,16 @@ export interface ToolRunSummaryOptions {
 	thoughtMsFor?: ThoughtSource;
 	/** 区间前那条带文本的回复：它不进入折叠，但思考耗时算进摘要。 */
 	extraThought?: Component;
+	/** Pi 实例上的 `hideThinkingBlock`：只影响展开态，收起态一律不渲染思考正文。 */
+	piHidden?: boolean;
 }
 
 /**
  * 一次请求里工具调用的摘要行 + 折叠内的时间线。
  *
  * 带可见文本的助手消息进入区间，正文照常渲染在摘要行下方，不再各自附带耗时标签。
- * `edit` / `write` 行参与区间但不被摘要行代表：摘要收起时它们仍逐条渲染。
+ * 收起时思考正文一并隐去，展开后回到 Pi 的设置；区间前那条回复的思考同样收在
+ * 摘要行里。`edit` / `write` 行参与区间但不被摘要行代表：摘要收起时它们仍逐条渲染。
  * 摘要内容每次渲染时从子组件重新累计，因此执行中/失败/主题切换都会即时反映；
  * 工具名与耗时随折叠区间增长而变化，不需要重建组件。
  */
@@ -347,6 +366,7 @@ export class ToolRunSummary extends Container {
 	/** 区间原始顺序：执行中的行不在 `children` 里，重扫要靠它把顺序还原。 */
 	private readonly itemOrder: readonly Component[];
 	private expandedState: boolean;
+	private piHidden: boolean;
 	/** 收起态下改动行的位置，点击要落到行上而不是整块折起摘要。 */
 	private soloLayout: Array<{ child: Component; start: number; height: number }> = [];
 
@@ -358,9 +378,11 @@ export class ToolRunSummary extends Container {
 		this.extraThought = options.extraThought;
 		this.itemOrder = options.sequence ?? options.items;
 		this.expandedState = options.expanded;
+		this.piHidden = options.piHidden ?? false;
 		for (const item of options.items) this.addChild(item);
 		// 复活已展开的摘要时，新纳入的轮次也要铺开，否则展开的时间线里夹着一行收起。
 		if (this.expandedState) this.setExpanded(true);
+		this.syncThinkingVisibility();
 	}
 
 	get expanded(): boolean {
@@ -377,7 +399,24 @@ export class ToolRunSummary extends Container {
 		for (const child of this.children) {
 			(child as { setExpanded?: (value: boolean) => void }).setExpanded?.(expanded);
 		}
+		this.syncThinkingVisibility();
 		this.invalidate();
+	}
+
+	/** Pi 实例上的思考开关变化：收起态仍隐去思考正文，展开态跟随这个值。 */
+	setPiThinkingHidden(hidden: boolean): void {
+		this.piHidden = hidden;
+		this.syncThinkingVisibility();
+	}
+
+	/**
+	 * 收起时思考由摘要行代表；展开后按 Pi 的设置显示。
+	 * `extraThought` 在摘要之外单独渲染，同样归这里管。
+	 */
+	private syncThinkingVisibility(): void {
+		const hidden = !this.expandedState || this.piHidden;
+		for (const child of this.children) setThinkingHidden(child, hidden);
+		setThinkingHidden(this.extraThought, hidden);
 	}
 
 	render(width: number): string[] {
@@ -604,7 +643,9 @@ export function groupSilentTurns(
 		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
 		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
 		// 区间与吸收内容都没变才复用：执行中的行刚结束时要把它纳入摘要。
+		const piHidden = mode.hideThinkingBlock === true;
 		if (reused && sameItems(reused.sequence, region.items) && sameItems(reused.children, absorbed)) {
+			reused.setPiThinkingHidden(piHidden);
 			next.push(reused);
 		} else {
 			next.push(
@@ -616,6 +657,7 @@ export function groupSilentTurns(
 					requestRender: () => mode.ui?.requestRender?.(),
 					thoughtMsFor: options.thoughtMsFor,
 					extraThought,
+					piHidden,
 				}),
 			);
 		}
@@ -633,14 +675,19 @@ export function groupSilentTurns(
  * 把思考可见性同步到折叠内的助手消息。
  *
  * Pi 的顶层遍历只覆盖 `chatContainer` 的直接子组件，被收进摘要的轮次收不到更新；
- * 这里只进入摘要与工具组，其他容器不动。
+ * 这里只进入摘要与工具组，其他容器不动。摘要收起时不显示思考正文，与传入的
+ * Pi 设置无关；只有展开态跟随它。
  */
 export function applyThinkingVisibility(root: Component, hidden: boolean): void {
 	if (root instanceof AssistantMessageComponent) {
-		(root as unknown as AssistantInternals).setHideThinkingBlock?.(hidden);
+		setThinkingHidden(root, hidden);
 		return;
 	}
-	if (root instanceof ToolRunSummary || root instanceof ToolRunGroup) {
+	if (root instanceof ToolRunSummary) {
+		root.setPiThinkingHidden(hidden);
+		return;
+	}
+	if (root instanceof ToolRunGroup) {
 		for (const child of root.children) applyThinkingVisibility(child, hidden);
 		return;
 	}

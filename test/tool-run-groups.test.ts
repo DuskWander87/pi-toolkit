@@ -16,7 +16,6 @@ import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
 import extend, {
 	ToolRunGroup,
 	ToolRunSummary,
-	applyThinkingVisibility,
 	applyThoughtLabel,
 	describeRun,
 	finishMessage,
@@ -292,7 +291,7 @@ check("显示思考时，收起态也不渲染静默轮次的思考正文", () =
 	assert.ok(expanded.join("\n").includes("这是一段很长的思考正文"), JSON.stringify(expanded));
 });
 
-check("带正文的助手消息收起时保留正文，思考可见性不变", () => {
+check("带正文的助手消息收起时保留正文、隐去思考，展开后恢复", () => {
 	const answer = assistantRow({
 		thinking: "思考正文",
 		text: "我发现了问题",
@@ -308,10 +307,41 @@ check("带正文的助手消息收起时保留正文，思考可见性不变", (
 	]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
-	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
-	assert.ok(lines.some((line) => line.includes("我发现了问题")), JSON.stringify(lines));
-	// D1：带可见文本的消息不投影为 text-only，思考正文仍随 hideThinkingBlock 显示。
-	assert.ok(lines.some((line) => line.includes("思考正文")), JSON.stringify(lines));
+	const summary = summariesOf(mode)[0]!;
+
+	const collapsed = plain(summary.render(WIDTH)).join("\n");
+	assert.ok(collapsed.includes("我发现了问题"), collapsed);
+	// 收起时由摘要行代表思考：正文保留，思考正文不占行。
+	assert.equal(collapsed.includes("思考正文"), false, collapsed);
+
+	summary.setExpanded(true);
+	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("思考正文"));
+});
+
+check("区间前那条带正文的回复收起时同样隐去思考", () => {
+	const first = assistantRow({ thinking: "区间外的思考", text: "先定位失败的用例", hideThinkingBlock: false });
+	const mode = fakeMode([first, finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+	const rendered = () => plain(mode.chatContainer.render(WIDTH)).join("\n");
+
+	assert.ok(rendered().includes("先定位失败的用例"));
+	assert.equal(rendered().includes("区间外的思考"), false);
+	summary.setExpanded(true);
+	assert.ok(rendered().includes("区间外的思考"));
+});
+
+check("收起时被隐去的思考不残留 Thinking... 占位", () => {
+	const mode = fakeMode([
+		assistantRow({ thinking: "思考正文", text: "正文", hideThinkingBlock: false }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const lines = plain(summariesOf(mode)[0]!.render(WIDTH)).join("\n");
+	assert.equal(lines.includes("Thinking..."), false, lines);
 });
 
 check("最终纯文本回复并入摘要并计入耗时", () => {
@@ -1125,7 +1155,7 @@ check("请求级摘要吸收带正文的后续回复，只留一行耗时", () =
 	);
 });
 
-check("折叠内的助手消息同步思考可见性", () => {
+check("收起时隐去思考正文，展开后按 Pi 设置显示", () => {
 	const answer = assistantRow({ thinking: "折叠里的思考", text: "正文", hideThinkingBlock: false });
 	const summary = new ToolRunSummary({
 		items: [answer],
@@ -1133,21 +1163,23 @@ check("折叠内的助手消息同步思考可见性", () => {
 		theme: () => undefined,
 		requestRender() {},
 	});
+	const shown = () => plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考");
 
-	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
-	applyThinkingVisibility(summary, true);
-	assert.equal(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"), false);
-	applyThinkingVisibility(summary, false);
-	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
+	assert.equal(shown(), false);
+	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("正文"));
+	summary.setExpanded(true);
+	assert.equal(shown(), true);
+	summary.setExpanded(false);
+	assert.equal(shown(), false);
 });
 
-check("Pi 切换隐藏思考时，折叠内的消息跟随实例上的开关", () => {
+check("Pi 切换隐藏思考时，展开态跟随实例开关、收起态始终隐去", () => {
 	assert.equal(installToolRunGroups(), true);
 	const answer = assistantRow({ thinking: "折叠里的思考", text: "正文", hideThinkingBlock: false });
 	const chat = new Container();
 	const summary = new ToolRunSummary({
 		items: [answer],
-		expanded: false,
+		expanded: true,
 		theme: () => undefined,
 		requestRender() {},
 	});
@@ -1158,19 +1190,27 @@ check("Pi 切换隐藏思考时，折叠内的消息跟随实例上的开关", (
 	const update = (
 		InteractiveMode.prototype as unknown as { updateThinkingBlockVisibility: (this: typeof mode) => void }
 	).updateThinkingBlockVisibility;
+	const shown = () => plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考");
 
 	update.call(mode);
 	assert.equal(
 		(answer as unknown as { hideThinkingBlock: boolean }).hideThinkingBlock,
 		true,
-		"折叠内消息应跟随 Pi 的隐藏设置",
+		"展开态应跟随 Pi 的隐藏设置",
 	);
-	assert.equal(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"), false);
+	assert.equal(shown(), false);
 
 	mode.hideThinkingBlock = false;
 	update.call(mode);
 	assert.equal((answer as unknown as { hideThinkingBlock: boolean }).hideThinkingBlock, false);
-	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("折叠里的思考"));
+	assert.equal(shown(), true);
+
+	// 收起后与 Pi 的设置无关：摘要行代表思考。
+	summary.setExpanded(false);
+	assert.equal(shown(), false);
+	mode.hideThinkingBlock = false;
+	update.call(mode);
+	assert.equal(shown(), false);
 });
 
 check("重复安装接管仍成功且不叠加处理", () => {

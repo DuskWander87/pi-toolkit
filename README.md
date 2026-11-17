@@ -77,7 +77,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 - 已在 Pi 1.5.2 验证，不承诺其他版本
 - 三个扩展都依赖 Pi 的内部结构：`minimal-tools` 使用工具渲染 API，`message-marks` 包装导出的组件原型，`tool-run-groups` 接管 `InteractiveMode` 的私有方法。Pi 升级后可能退化或失效
-- 思考正文默认显示；只有把 `hideThinkingBlock` 设为 `true` 时才会换成隐藏标签。扩展不修改该设置
+- 摘要收起时思考正文不占行；展开后显示思考正文。Pi 的 `hideThinkingBlock` 为 `true` 时，摘要区间内的轮次整段不显示思考，也没有可点开的标签，耗时只出现在摘要行上。想读思考正文需要关掉该设置，扩展不修改它
 - `tool-run-groups` 的点击展开依赖终端支持鼠标事件；`Ctrl+O` 始终可用
 
 ## 测试

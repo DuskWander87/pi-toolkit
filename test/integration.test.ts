@@ -135,4 +135,22 @@ check("静默轮次的思考正文只在展开后出现", () => {
 	assert.ok(plain(chat.render(WIDTH)).join("\n").includes("折叠里的思考"));
 });
 
+check("带正文的轮次收起时只剩正文与摘要行", () => {
+	const chat = new Container();
+	chat.addChild(assistantRow("先确认现状", "先看看当前的失败用例。"));
+	chat.addChild(toolRow("e1", "ls"));
+	chat.addChild(toolRow("e2", "pwd"));
+	chat.addChild(assistantRow("收尾思考", "已经修好了。"));
+	const mode = { chatContainer: chat, toolOutputExpanded: false, ui: { requestRender() {} } };
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 3000 });
+
+	const collapsed = plain(chat.render(WIDTH)).join("\n");
+	assert.ok(collapsed.includes("先看看当前的失败用例。"), collapsed);
+	assert.ok(collapsed.includes("已经修好了。"), collapsed);
+	assert.ok(collapsed.includes("Thought for 6s, ran 2 shell commands"), collapsed);
+	assert.equal(collapsed.includes("先确认现状"), false, collapsed);
+	assert.equal(collapsed.includes("收尾思考"), false, collapsed);
+});
+
 finish();

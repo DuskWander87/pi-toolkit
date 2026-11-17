@@ -77,7 +77,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 - Verified against Pi 1.5.2; other versions are not promised
 - All three extensions depend on Pi internals: `minimal-tools` uses the tool renderer API, `message-marks` wraps exported component prototypes, and `tool-run-groups` takes over private `InteractiveMode` methods. A Pi upgrade may degrade or break them
-- Thinking text is shown by default. The hidden label only appears when `hideThinkingBlock` is `true`; the extensions never change that setting
+- Collapsed summaries drop the thinking text; expanding shows it. With `hideThinkingBlock` set to `true`, rounds inside a summary show neither the thinking text nor a clickable label; only the total time in the summary line remains. Turn that setting off to read the thinking text; the extensions never change it
 - Click to expand in `tool-run-groups` needs a terminal that reports mouse events. `Ctrl+O` always works
 
 ## Tests
