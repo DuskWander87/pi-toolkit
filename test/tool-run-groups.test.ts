@@ -1088,9 +1088,49 @@ check("收起态点击改动行交给行自己处理", () => {
 	assert.equal(forwarded, editY - 2, "应转发到改动行自身坐标");
 	assert.equal(summary.expanded, false, "摘要不应跟着折起");
 
-	// 摘要行与空行照旧折起整块。
+	// 只有摘要行负责折起。
 	summary.handleMouse({ type: "click", button: "left", x: 3, y: 1, height: 1 } as any);
 	assert.equal(summary.expanded, true);
+});
+
+check("收起态点击正文行不切换摘要，只有摘要行切换", () => {
+	const mode = fakeMode([
+		assistantRow({ text: "第一段正文" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ text: "第二段正文" }),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	const summary = summariesOf(mode)[0]!;
+
+	const lines = plain(summary.render(WIDTH));
+	const bodyY = lines.findIndex((line) => line.includes("第二段正文"));
+	assert.ok(bodyY > 1, JSON.stringify(lines));
+	summary.handleMouse({ type: "click", button: "left", x: 3, y: bodyY, height: 1 } as any);
+	assert.equal(summary.expanded, false, "点击正文不应展开摘要");
+
+	summary.handleMouse({ type: "click", button: "left", x: 3, y: 1, height: 1 } as any);
+	assert.equal(summary.expanded, true, "点击摘要行应展开");
+});
+
+check("单轮工具组同样只有摘要行负责切换", () => {
+	let renders = 0;
+	const group = new ToolRunGroup({
+		rows: [finishedBash("c1", "ls"), finishedBash("c2", "pwd")] as any,
+		toolNames: ["bash", "bash"],
+		expanded: false,
+		theme: () => undefined,
+		requestRender: () => renders++,
+	});
+
+	group.render(WIDTH);
+	group.handleMouse({ type: "click", button: "left", x: 3, y: 0, height: 2 } as any);
+	assert.equal(group.expanded, false, "点击空行不应展开");
+
+	group.handleMouse({ type: "click", button: "left", x: 3, y: 1, height: 2 } as any);
+	assert.equal(group.expanded, true, "点击摘要行应展开");
+	assert.equal(renders, 1);
 });
 
 check("展开态重建后新纳入的工具组也展开", () => {

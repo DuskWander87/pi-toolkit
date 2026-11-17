@@ -261,16 +261,13 @@ export class ToolRunGroup extends Container {
 	}
 
 	handleMouse(event: TuiMouseEvent): MouseDispatchResult | undefined {
-		// 收起时整块可点；展开时只有摘要行负责折叠，其余行交给工具行自己处理。
-		if (
-			event.type === "click" &&
-			event.button === "left" &&
-			(!this.expandedState || event.y === 1)
-		) {
+		// 两级摘要一致的规则：只有摘要行负责切换，其余行交给子组件。
+		if (event.type === "click" && event.button === "left" && event.y === 1) {
 			this.setExpanded(!this.expandedState);
 			this.requestRender();
 			return { handled: true } as MouseDispatchResult;
 		}
+		if (!this.expandedState) return undefined;
 		return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
 	}
 
@@ -449,14 +446,15 @@ export class ToolRunSummary extends Container {
 				if (event.y !== 1) {
 					return super.handleMouse({ ...event, y: event.y - 2, height: event.height - 2 });
 				}
-			} else {
-				// 收起时改动行逐条可见，点击先落到行上（比如展开 diff）。
+			} else if (event.y !== 1) {
+				// 收起时只有摘要行负责展开；正文与改动行逐条可见，点击先落到行上。
 				for (const { child, start, height } of this.soloLayout) {
 					if (event.y < start || event.y >= start + height) continue;
-					const result = child.handleMouse?.({ ...event, y: event.y - start, height });
-					if (result) return result as MouseDispatchResult;
-					break;
+					return child.handleMouse?.({ ...event, y: event.y - start, height }) as
+						| MouseDispatchResult
+						| undefined;
 				}
+				return undefined;
 			}
 			this.setExpanded(!this.expandedState);
 			this.requestRender();
