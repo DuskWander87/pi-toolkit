@@ -103,7 +103,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 | `test/message-marks.test.ts` | `message-marks`：用户消息、助手与工具圆点、颜色、行宽 |
 | `test/editor-prefix.test.ts` | `message-marks`：输入框前缀、宽度与光标 |
 | `test/tool-run-groups.test.ts` | `tool-run-groups`：聚合、边界、摘要文案、展开与点击 |
-| `test/integration.test.ts` | 三个扩展同时安装时的左缘对齐与静默轮次可见性 |
+| `test/integration.test.ts` | 三个扩展同时安装时的左缘对齐、静默轮次可见性与上游渲染工具的换壳底色 |
 
 ## 许可
 

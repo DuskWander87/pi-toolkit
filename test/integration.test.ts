@@ -11,7 +11,7 @@ import {
 	getMarkdownTheme,
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
+import { Box, Container, Text, stripTerminalSequences } from "@earendil-works/pi-tui";
 import installMessageMarks from "../extensions/message-marks/index.ts";
 import installMinimalTools from "../extensions/minimal-tools/index.ts";
 import { ToolRunSummary, groupSilentTurns, groupToolRuns } from "../extensions/tool-run-groups/index.ts";
@@ -77,6 +77,56 @@ function assistantRow(thinking: string, text?: string): AssistantMessageComponen
 
 function plain(lines: string[]): string[] {
 	return lines.map(stripTerminalSequences);
+}
+
+/** 每行的底色转义前缀；无底色时为 undefined。 */
+function bgOf(line: string): string | undefined {
+	return line.match(/^\x1b\[48;[0-9;]*m/)?.[0];
+}
+
+function bodyLines(lines: string[]): string[] {
+	return lines.filter((line) => stripTerminalSequences(line).trim() !== "");
+}
+
+/**
+ * 与 `pi-web-access` 同形的上游渲染器：调用行 + 收起预览 `Box(1, 0)`、展开纯 `Text`。
+ * 上游不铺底色（只有文本与 `fg`），因此行上的底色转义只可能来自外层壳。
+ */
+const SEARCH_UPSTREAM = {
+	renderCall: () => new Text('search  "pi tui"', 0, 0),
+	renderResult: (_result: unknown, options: { expanded: boolean }) => {
+		if (!options.expanded) {
+			const box = new Box(1, 0);
+			box.addChild(new Text("3 sources · preview", 0, 0));
+			return box;
+		}
+		return new Text("2 sources", 0, 0);
+	},
+};
+
+/** 走 Pi 真实 tool-execution 组合，返回带底色转义的行。 */
+function upstreamRow(
+	toolName: string,
+	options: { expanded?: boolean; isPartial?: boolean; isError?: boolean } = {},
+) {
+	const renderers = resolver!(toolName, () => SEARCH_UPSTREAM);
+	const row = new ToolExecutionComponent(
+		toolName,
+		`${toolName}-${options.expanded ? "expanded" : "collapsed"}-${options.isError ? "error" : "ok"}`,
+		{ query: "pi tui" },
+		{ outputPad: 1 },
+		renderers,
+		{ requestRender() {} } as any,
+		process.cwd(),
+	);
+	row.setExpanded(options.expanded ?? false);
+	row.markExecutionStarted();
+	row.setArgsComplete();
+	row.updateResult(
+		{ content: [{ type: "text", text: "ok" }], details: {}, isError: options.isError } as any,
+		options.isPartial ?? false,
+	);
+	return bodyLines(row.render(WIDTH));
 }
 
 check("三扩展同时安装时用户、摘要与工具行左缘一致", () => {
@@ -151,6 +201,54 @@ check("带正文的轮次收起时只剩正文与摘要行", () => {
 	assert.ok(collapsed.includes("Thought for 6s, ran 2 shell commands"), collapsed);
 	assert.equal(collapsed.includes("先确认现状"), false, collapsed);
 	assert.equal(collapsed.includes("收尾思考"), false, collapsed);
+});
+
+// ---------------------------------------------------------------- 上游渲染工具换壳
+check("上游渲染的搜索工具换壳后无底色，未换壳的上游工具仍由 Pi 默认壳铺底", () => {
+	const search = upstreamRow("web_search");
+	// 对照组：同样走上游渲染、不在换壳名单里，仍然整块带底色——证明底色检测本身有效。
+	const unswapped = upstreamRow("powershell");
+	assert.ok(
+		unswapped.every((line) => bgOf(line) !== undefined),
+		JSON.stringify(plain(unswapped)),
+	);
+	assert.equal(
+		search.some((line) => bgOf(line) !== undefined),
+		false,
+		JSON.stringify(plain(search)),
+	);
+	// 不是空渲染：调用行与上游收起预览都真的在行里。
+	const visible = plain(search).join("\n");
+	assert.ok(visible.includes('search  "pi tui"'), visible);
+	assert.ok(visible.includes("3 sources · preview"), visible);
+});
+
+check("搜索工具只在展开且成功时把调用行并进同一块底色", () => {
+	const running = upstreamRow("fetch_content", { isPartial: true });
+	assert.equal(
+		running.some((line) => bgOf(line) !== undefined),
+		false,
+		JSON.stringify(plain(running)),
+	);
+
+	const expanded = upstreamRow("web_search", { expanded: true });
+	const tokens = new Set(expanded.map(bgOf));
+	assert.equal(tokens.size, 1, JSON.stringify(plain(expanded)));
+	const blockToken = [...tokens][0];
+	assert.notEqual(blockToken, undefined, "展开块缺少底色");
+	// 与 Pi 默认壳的成功底色不同：这块来自本扩展的展开块，不是沿用默认壳。
+	assert.notEqual(blockToken, bgOf(upstreamRow("powershell", { expanded: true })[0]));
+	// 调用行并进结果块，不再单独占一段。
+	assert.equal(expanded.length, 2, JSON.stringify(plain(expanded)));
+	assert.ok(plain(expanded)[0].includes('search  "pi tui"'), JSON.stringify(plain(expanded)));
+});
+
+check("搜索工具展开出错时调用行仍单独一段", () => {
+	const lines = upstreamRow("web_search", { expanded: true, isError: true });
+	assert.equal(lines.length, 2, JSON.stringify(plain(lines)));
+	assert.equal(bgOf(lines[0]), undefined, JSON.stringify(plain(lines)));
+	assert.ok(stripTerminalSequences(lines[0]!).includes('search  "pi tui"'), JSON.stringify(plain(lines)));
+	assert.notEqual(bgOf(lines[1]), undefined, JSON.stringify(plain(lines)));
 });
 
 finish();

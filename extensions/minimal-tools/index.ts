@@ -25,6 +25,7 @@ import { homedir } from "node:os";
 type RenderArgs = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>;
 type RenderTheme = RenderArgs[1];
 type RenderContext = RenderArgs[2];
+type RenderResultArgs = Parameters<NonNullable<ToolRenderers["renderResult"]>>;
 
 const MAX_COMMAND_CHARS = 100;
 /** 默认展示的 diff 行数上限，超出部分靠 Ctrl+O 展开。 */
@@ -947,6 +948,41 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	},
 };
 
+/**
+ * 保留上游渲染器、只替换外层壳的工具名。
+ *
+ * Pi 给走默认壳的工具行套一个带 `toolPendingBg` / `toolSuccessBg` / `toolErrorBg`
+ * 背景的 Box，收起态也是整块底色；本扩展其余工具都是行级无底色。这几个工具由
+ * `npm:pi-web-access` 注册，自带 renderCall / renderResult（查询列表、进度条、来源
+ * 分组），内容需要保留，因此不改写渲染器，只换成 self 壳并补回缩进。展开后的成功结果
+ * 把上游调用行与结果装进同一块 `toolPendingBg` 区域，与本扩展其它工具的展开块一致。
+ *
+ * 换壳要求两个渲染槽都在：只保留一个槽的工具沿用上游外壳与排版（单槽路径下 Pi 的
+ * fallback 行不带 `outputPad` 缩进，展开并块也补不回被隐藏的调用行）。
+ *
+ * 依赖上游工具名（`pi-web-access` 也允许通过 `toolNames` 配置改名）：上游改名后这里
+ * 会静默失效——表现是这些工具行重新出现整块底色，渲染内容本身不受影响。排查时先
+ * 核对该包实际注册的工具名。
+ */
+const UPSTREAM_RENDERER_TOOLS = new Set(["web_search", "fetch_content", "get_search_content"]);
+
+/** self 壳不再设置 paddingX：只补缩进，不铺底色。 */
+function withPad(component: Component, pad: number): Box {
+	const box = new Box(pad, 0);
+	box.addChild(component);
+	return box;
+}
+
+/**
+ * 展开且成功的结束态：调用行并进结果块。
+ *
+ * 与 `expandedBlock` 的单块形态一致——`bash` 展开时命令行就在背景块内。
+ * 运行中与出错时仍保留分开的两段，同样对齐 `prepareCall` 的取舍。
+ */
+function mergesIntoResultBlock(expanded: boolean, isPartial: boolean, isError: boolean): boolean {
+	return expanded && !isPartial && !isError;
+}
+
 // ============================================================================
 // 扩展入口
 // ============================================================================
@@ -961,12 +997,44 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.setHiddenThinkingLabel(`\x1b[0m${thinkingFg}Thinking...`);
 	});
 
-	// 先看定制表；表外工具尊重上游：任一渲染槽存在时整体让位，两者都没有才折叠。
+	// 先看定制表；表外工具里，`UPSTREAM_RENDERER_TOOLS` 换壳沿用上游渲染，其余尊重
+	// 上游：任一渲染槽存在时整体让位，两者都没有才折叠。
 	pi.registerToolRenderer((toolName, next) => {
 		const custom = CUSTOM_RENDERERS[toolName] as ToolRenderers | undefined;
 		if (custom) return custom;
 		const upstream = next();
-		if (upstream?.renderCall || upstream?.renderResult) return upstream;
-		return genericRenderers(toolName);
+		if (!upstream?.renderCall && !upstream?.renderResult) return genericRenderers(toolName);
+		if (!UPSTREAM_RENDERER_TOOLS.has(toolName)) return upstream;
+		const { renderCall, renderResult } = upstream;
+		// 两个槽都在才换壳：self 壳要自己补缩进，缺槽时 Pi 的 fallback 行不带缩进；
+		// 展开并块也依赖调用行槽把被隐藏的调用行补回结果块内。
+		if (!renderCall || !renderResult) return upstream;
+		return {
+			...upstream,
+			renderShell: "self",
+			renderCall: (...args: RenderArgs) => {
+				const context = args[2];
+				// 调用行已并进结果块，这里不再重复渲染。
+				if (mergesIntoResultBlock(context.expanded, context.isPartial, context.isError)) {
+					return new Text("", context.outputPad, 0);
+				}
+				return withPad(renderCall(...args), context.outputPad);
+			},
+			renderResult: (...args: RenderResultArgs) => {
+				const options = args[1];
+				const theme = args[2];
+				const context = args[3];
+				// 展开且已结束才铺底色，与 `expandedBlock` 一致；收起态和运行中保持行级无底色。
+				if (!options.expanded || options.isPartial) {
+					return withPad(renderResult(...args), context.outputPad);
+				}
+				const box = blockBox(theme, context.outputPad);
+				if (mergesIntoResultBlock(options.expanded, options.isPartial, context.isError)) {
+					box.addChild(renderCall(context.args, theme, context));
+				}
+				box.addChild(renderResult(...args));
+				return box;
+			},
+		};
 	});
 }

@@ -6,7 +6,7 @@
 import assert from "node:assert";
 import { homedir } from "node:os";
 import chalk from "chalk";
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { Box, stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
 import extend from "../extensions/minimal-tools/index.ts";
 import { check, finish } from "./harness.ts";
 
@@ -689,6 +689,122 @@ check("隐藏思考标签在 pi 的斜体包裹下不再显示为斜体", () => 
 		if (codes.includes(23)) italic = false;
 	}
 	assert.equal(italic, false, JSON.stringify(composed));
+});
+
+// ---------------------------------------------------------------- 17. 上游渲染器换壳
+check("搜索类工具沿用上游渲染、换成 self 壳并补回缩进", () => {
+	for (const name of ["web_search", "fetch_content", "get_search_content"]) {
+		const r = renderers(name, UPSTREAM);
+		assert.notEqual(r, UPSTREAM);
+		assert.equal(r.renderShell, "self");
+		// Pi 的默认壳会给行套 toolPendingBg/SuccessBg/ErrorBg 背景；self 壳不再设置。
+		assert.equal(text(r.renderCall({}, theme, ctx())), " UPSTREAM_CALL");
+		assert.equal(
+			text(r.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, ctx())),
+			" UPSTREAM_RESULT",
+		);
+	}
+	// 表外但不在列表内的工具仍整体让位，保持原有底色与上游排版。
+	assert.equal(renderers("mcp__sqlite__query", UPSTREAM), UPSTREAM);
+});
+
+check("搜索类工具上游缺一个渲染槽时不换壳", () => {
+	// 单槽下 self 壳拿不到缩进，展开并块也没有调用行可以补回，因此整体让位给上游。
+	const onlyResult = { renderResult: UPSTREAM.renderResult };
+	assert.equal(renderers("web_search", onlyResult), onlyResult);
+	const onlyCall = { renderCall: UPSTREAM.renderCall };
+	assert.equal(renderers("fetch_content", onlyCall), onlyCall);
+});
+
+check("搜索类工具上游返回 Box 时缩进叠加且不超宽", () => {
+	// pi-web-access 的错误分支返回自带内边距与背景的 Box。
+	const upstream = {
+		renderCall: () => new Text("search 1 query", 0, 0),
+		renderResult: () => {
+			const box = new Box(1, 0, (line: string) => theme.bg("toolErrorBg", line));
+			box.addChild(new Text(theme.fg("error", "Error: boom"), 0, 0));
+			return box;
+		},
+	};
+	const r = renderers("web_search", upstream);
+	const out = text(r.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, ctx()));
+	// 外层补 outputPad(1)，上游 Box 自带 1 格内边距。
+	assert.equal(out, "  Error: boom");
+	for (const line of out.split("\n")) assert.ok(visibleWidth(line) <= 200, JSON.stringify(line));
+});
+
+check("fetch_content answer 模式的长文本折行后不超宽", () => {
+	const answer = "长答案文本".repeat(60);
+	const upstream = {
+		renderCall: () => new Text("fetch 1 URL", 0, 0),
+		renderResult: () => new Text(answer, 0, 0),
+	};
+	const r = renderers("fetch_content", upstream);
+	const lines = r
+		.renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, ctx())
+		.render(80);
+	assert.ok(lines.length > 1, "长文本应折行");
+	for (const line of lines) assert.ok(visibleWidth(line.replace(/\s+$/, "")) <= 80, JSON.stringify(line));
+	assert.equal(lines.map((line: string) => line.trim()).join(""), answer);
+});
+
+check("outputPad=0 时换壳后仍齐左", () => {
+	const upstream = {
+		renderCall: () => new Text("search 1 query", 0, 0),
+		renderResult: () => new Text("status", 0, 0),
+	};
+	const r = renderers("web_search", upstream);
+	assert.notEqual(r, upstream);
+	assert.equal(text(r.renderCall({}, theme, ctx({ outputPad: 0 }))), "search 1 query");
+});
+
+check("搜索类工具只在展开且已结束时铺 toolPendingBg 块", () => {
+	const upstream = {
+		renderCall: () => new Text("fetch 1 URL", 0, 0),
+		renderResult: () => new Text("status\npreview", 0, 0),
+	};
+	const r = renderers("fetch_content", upstream);
+	const cases: Array<{ options: { expanded: boolean; isPartial: boolean }; expectsBg: boolean }> = [
+		{ options: { expanded: true, isPartial: false }, expectsBg: true },
+		{ options: { expanded: false, isPartial: false }, expectsBg: false },
+		{ options: { expanded: true, isPartial: true }, expectsBg: false },
+	];
+	for (const { options, expectsBg } of cases) {
+		usedColors.clear();
+		text(r.renderResult({ content: [] }, options, theme, ctx(options)));
+		assert.equal(usedColors.has("bg:toolPendingBg"), expectsBg, JSON.stringify(options));
+	}
+});
+
+check("展开且成功时调用行并进结果块，只剩一块背景区域", () => {
+	const r = renderers("web_search", UPSTREAM);
+	const expanded = { expanded: true, isPartial: false };
+	const context = ctx(expanded);
+	// 调用行不再单独占一行，其内容由结果块里的上游 renderCall 提供。
+	assert.equal(text(r.renderCall({}, theme, context)), "");
+	usedColors.clear();
+	assert.equal(text(r.renderResult({ content: [] }, expanded, theme, context)), " UPSTREAM_CALL\n UPSTREAM_RESULT");
+	assert.ok(usedColors.has("bg:toolPendingBg"), "展开块缺少背景色");
+});
+
+check("展开且出错时调用行仍单独渲染，结果块仍铺底", () => {
+	const r = renderers("web_search", UPSTREAM);
+	const expanded = { expanded: true, isPartial: false };
+	const context = ctx({ ...expanded, isError: true });
+	assert.equal(text(r.renderCall({}, theme, context)), " UPSTREAM_CALL");
+	usedColors.clear();
+	assert.equal(text(r.renderResult({ content: [] }, expanded, theme, context)), " UPSTREAM_RESULT");
+	assert.ok(usedColors.has("bg:toolPendingBg"), "错误展开块缺少背景色");
+});
+
+check("运行中不并块且不铺底", () => {
+	const r = renderers("fetch_content", UPSTREAM);
+	const running = { expanded: true, isPartial: true };
+	const context = ctx(running);
+	assert.equal(text(r.renderCall({}, theme, context)), " UPSTREAM_CALL");
+	usedColors.clear();
+	assert.equal(text(r.renderResult({ content: [] }, running, theme, context)), " UPSTREAM_RESULT");
+	assert.equal(usedColors.size, 0, [...usedColors].join(","));
 });
 
 finish();

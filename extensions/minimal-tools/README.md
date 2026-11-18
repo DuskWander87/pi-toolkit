@@ -73,6 +73,7 @@
 未单独适配的工具尊重上游渲染：
 
 - 上游提供 `renderCall` 或 `renderResult` 任一槽时，整体使用上游渲染（例如 Pi 内置的 `powershell`）
+- 例外是 `web_search` / `fetch_content` / `get_search_content`（两个渲染槽都在时）：保留上游的调用行、进度条与结果分组，但套无底色的行级外壳，缩进由 `outputPad` 补回；收起态保持行级无底色，行数与内容仍由上游决定（调用行 + 上游自己的摘要 / 预览），不是单行摘要。展开且成功时调用行与结果并进同一块 `toolPendingBg` 区域（运行中、出错时仍分两段，与其它工具相同）
 - 两者都没有时自动套用同一套两阶段渲染：调用行取第一个非空字符串参数（截断到 40 字符），结果收起为 `<工具名> · N lines`
 - 上游只提供 `renderShell`、没有调用行 / 结果行时，仍由本扩展折叠
 - 没有上游渲染槽的工具返回图片时，摘要只统计文本行（可能显示 `0 lines`），图片由 Pi 独立渲染
@@ -94,12 +95,12 @@
 ## 与其他扩展
 
 - 单独安装即可工作
-- 与 `message-marks` 一起装时，工具行会被对齐到 2 列标记栏，首行带状态圆点
+- 与 `message-marks` 一起装时，工具行会被对齐到 2 列标记栏，首行带状态圆点；此时本扩展按 `outputPad` 补的缩进被标记栏吸收，`outputPad` 只剩影响换行宽度的作用
 - 与 `tool-run-groups` 一起装时，本扩展渲染出的工具行会被折叠进摘要；展开后仍是同样的内容
 
 ## 实现原理
 
-- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`；先查定制表，再让位给上游，两者都没有时使用通用折叠
+- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`；先查定制表，再让位给上游，两者都没有时使用通用折叠。表外工具里，`UPSTREAM_RENDERER_TOOLS` 列出的搜索类工具在上游同时提供两个渲染槽时保留上游渲染器、只换成 self 壳并补 `outputPad` 缩进；缺一个槽时仍整体让位
 - 只替换渲染，不替换执行：`bash` 的 `shellPath`、`PI_*` 环境变量等仍由 Pi 内置定义处理
 - 运行中计时保存在 `context.state`，每秒调用一次 `invalidate()`，结束时清除 interval
 - diff 配色按 `theme.appearance` 在深色 / 浅色两套 RGB 底色中切换
@@ -112,6 +113,8 @@
 - **词级高亮有前提**：只处理「单行删除 + 单行新增」的配对；变化字符超过行内容 70% 时退化为行级底色，单行超过 300 字符时改用公共前后缀定位
 - **主题切换**：思考标签颜色在 `session_start` 时取值，切换主题后需要 `/reload`；diff 底色只看明暗外观，自定义主题的配色可能与扩展不一致
 - **依赖 Pi 的渲染 API**：`registerToolRenderer`、`ToolRenderers`、`context.state`、`context.outputPad` 等结构变化时需要同步调整
+- **搜索类工具名是硬编码的**：`pi-web-access` 改名（含它的 `toolNames` 配置）后换壳静默失效，这些工具行会重新出现整块底色，渲染内容本身不受影响
+- **搜索类工具的错误底色由上游决定**：`pi-web-access` 的结果渲染只看 `details.error`，不看 `isError`；工具抛异常这类没有 `details.error` 的错误会渲染成正常状态行。本扩展不另铺底色——上游多数错误分支自带 `toolErrorBg` 块，再套一层会让一行出现两段底色
 
 ## 测试
 
