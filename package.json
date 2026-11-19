@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Pi coding agent 的扩展集合：工具调用折叠、2 列标记栏，以及把技能加载换成专用工具",
+	"description": "Pi coding agent 的扩展集合：渲染类让对话更紧凑，agent 类改工具与提示词，每个扩展可单独安装",
 	"license": "MIT",
 	"engines": {
 		"node": ">=22"
