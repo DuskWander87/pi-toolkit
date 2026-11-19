@@ -2,9 +2,9 @@
 
 Extensions for the Pi coding agent, split by where they change things: rendering extensions change only how a conversation is displayed, agent extensions change the agent's tools, prompt, or behavior. Each extension owns one directory, works on its own, and can be installed alone. Session data, config, and tool implementations stay untouched.
 
-The goal is to read a turn in fewer lines, then expand when you need detail.
+The rendering extensions aim to read a turn in fewer lines, then expand when you need detail.
 
-Everything is verified against Pi 1.5.2 and every extension depends on Pi internals, so a Pi upgrade may degrade or break them; see [Compatibility](#compatibility).
+Version and dependency scope: see [Compatibility](#compatibility).
 
 [中文](README.md) | English
 
@@ -41,7 +41,7 @@ This screen layers three rendering extensions: `minimal-tools`, `message-marks`,
 |---|---|
 | [skill-tool](extensions/agent/skill-tool/README.md) | Turns skill loading into a dedicated tool, with the catalog in its description |
 
-How to pick: an extension that only changes display is rendering; one that changes the agent's tools, prompt, or behavior is agent. An extension that does both goes under agent, leaving rendering to the rendering extensions.
+How to pick: an extension that only changes display is rendering; one that changes the agent's tools, prompt, or behavior is agent.
 
 Behavior, keybindings, implementation notes, and limits live in each directory's README instead of here. A new category directory needs a `package.json` that lists its entry points under `pi.extensions` and sets `"type": "module"`: Pi discovers extensions one level deep and skips a category directory without that manifest, and without the module type `moduleResolution: NodeNext` parses the directory as CommonJS.
 
@@ -78,7 +78,7 @@ Disable the extensions you do not want. The change applies on the next start.
 pi -e ./pi-toolkit
 ```
 
-`-e` applies to one launch and is cached under `~/.pi/agent/tmp/extensions/`.
+`-e` applies to one launch and is cached under `~/.pi/agent/tmp/extensions/`. Run it from the directory that contains the clone, as with the install command above.
 
 ### Update and uninstall
 
@@ -90,7 +90,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 ## Compatibility
 
 - Verified against Pi 1.5.2; other versions are not promised
-- Every extension depends on Pi internals in its own place, so a Pi upgrade may degrade or break them. Each README lists its own dependency points under Limits
+- Every extension depends on Pi internals in its own place, so a Pi upgrade may degrade or break them. Each README lists its own dependency points under its 边界 (boundaries) or 限制 (limits) section
 
 ## Tests
 

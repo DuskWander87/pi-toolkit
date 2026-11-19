@@ -2,9 +2,9 @@
 
 Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对话怎么显示，agent 类改 agent 的工具、提示词与行为。每个扩展占一个目录，彼此独立，可以只装其中一个。会话数据、配置与工具实现都不改。
 
-目标是用更少的行数读完一轮对话，需要细节时再展开。
+渲染类扩展的目标是用更少的行数读完一轮对话，需要细节时再展开。
 
-都在 Pi 1.5.2 上验证过，且都依赖 Pi 的内部结构，升级后可能退化或失效，见[兼容性](#兼容性)。
+版本与依赖范围见[兼容性](#兼容性)。
 
 中文 | [English](README.en.md)
 
@@ -41,7 +41,7 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 |---|---|
 | [skill-tool](extensions/agent/skill-tool/README.md) | 技能的加载动作换成专用工具，清单随之挪进工具描述 |
 
-归类判据：只改显示就是渲染类；改 agent 的工具、提示词或行为就是 agent 类。两者兼顾的扩展归 agent 类，渲染部分交给渲染类扩展兜底。
+归类判据：只改显示就是渲染类；改 agent 的工具、提示词或行为就是 agent 类。
 
 行为、快捷键、实现方式与限制都写在各自目录的 README 里，这里不重复。新分类目录需要在该目录下放 `package.json`，用 `pi.extensions` 列出入口，并写明 `"type": "module"`：Pi 的扩展发现只往下认一层，没有清单的分类目录会被整个跳过；缺 `type` 会让 `moduleResolution: NodeNext` 把该目录当 CommonJS 解析。
 
@@ -109,7 +109,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 
 本机已经把 `node_modules` 指向 Pi 安装目录时，跳过这一步。
 
-测试放在 `test/` 下，文件与 `extensions/` 的目录一一对应（`test/render/*.test.ts`、`test/agent/*.test.ts`），一个扩展一个测试文件，覆盖项写在用例名里；`test/integration.test.ts` 覆盖多个扩展同时安装。
+测试放在 `test/` 下，按 `extensions/` 的目录分组：`test/render/*.test.ts`、`test/agent/*.test.ts`，一个扩展一个测试文件，覆盖项写在用例名里。`test/integration.test.ts` 覆盖多个扩展同时安装。
 
 ## 许可
 

@@ -1,8 +1,8 @@
 # skill-tool
 
-把技能的加载动作从「read 一个绝对路径」换成「调一个专用工具」，让模型更容易想起来用技能。
+把技能的加载动作从 `read` 一个绝对路径换成 `skill` 工具，技能清单从 system prompt 下沉到工具描述。
 
-## 之前
+## Pi 原生的加载方式
 
 Pi 1.5.2 把技能清单放在 system prompt 的 `<skills>` 段里，只给一句软提示：任务匹配时用 `read` 读技能文件。
 
@@ -17,9 +17,9 @@ system prompt
   read({ path: "/Users/…/.agents/skills/write/SKILL.md" })
 ```
 
-加载动作等于「自己抄一个绝对路径，再调通用 `read`」。本地 19 个会话的实测：模型自主加载技能文件 0 次；用户显式 `/skill:xxx` 3 次，全部成功。机制能用，自主触发没有发生。
+加载动作等于「自己抄一个绝对路径，再调通用 `read`」。扩展开发期间，模型自主加载技能文件 0 次，用户显式 `/skill:` 3 次，全部成功。机制能用，自主触发没有发生。
 
-## 之后
+## 本扩展的加载方式
 
 ```text
 system prompt
@@ -37,19 +37,19 @@ skill 工具的描述
 
 扩展在 `before_agent_start` 里清空 `systemPromptOptions.skills`，Pi 重渲染时 `<skills>` 段不再出现；同一份清单写进 `skill` 工具的描述。工具执行时按名字查表，读出 `SKILL.md`、去掉 frontmatter，按 Pi 原生 `/skill:name` 的形状返回正文。
 
-## 差别
+## 两种方式的差异
 
-| | 之前 | 之后 |
+| | Pi 原生 | 本扩展 |
 |---|---|---|
 | 加载动作 | `read(<绝对路径>)` | `skill({ name })` |
 | 清单载体 | system prompt 的 `<skills>` 段 | `skill` 工具的描述 |
 | 模型的路径负担 | 调用前要抄一个绝对路径 | 只记名字，路径由扩展解析 |
 
-顺带省下 `<skills>` 段占的约 4000 字符。
+顺带省下 `<skills>` 段占的约 4000 字符。2026-11-19 用 `--no-extensions` 启动后，会话里 `sections.skills` 的长度为 3971。
 
-## 它没有解决什么
+## 验证范围
 
-这不是自动触发。清单换了位置，决定权仍在模型：它得先想到技能存在、再看描述、再发起调用。原来那份清单在 system prompt 里，位置更显眼；现在在工具描述里，位置变了不等于注意力变了。工具化假设是否成立，只能靠下面的行为验收来判断。
+这不是自动触发。清单换了位置，决定权仍在模型：它得先想到技能存在、再看描述、再发起调用。原来那份清单在 system prompt 里，位置更显眼；现在在工具描述里，位置变了不等于注意力变了。工具化假设是否成立，只能靠行为验收来判断。
 
 ## 安装
 
@@ -66,12 +66,12 @@ npm run typecheck
 npm test
 ```
 
-`--print` 不落盘，所以验收跑在一个临时会话目录里，跑完可以整目录删掉。
+`--print` 不写默认会话目录；传入 `--session-dir` 后写入该目录，目录需要事先存在，跑完可以整目录删掉。
 
 反证 `<skills>` 段已消失：
 
 ```bash
-rm -rf /tmp/skill-check
+rm -rf /tmp/skill-check && mkdir -p /tmp/skill-check
 pi -e ./extensions/agent/skill-tool --session-dir /tmp/skill-check --print "列出你当前能看到的工具名" >/dev/null
 python3 -c "
 import json, glob
@@ -87,7 +87,7 @@ for line in open(sorted(glob.glob('/tmp/skill-check/*.jsonl'))[-1]):
 行为验收（唯一能证明触发发生了的证据）：
 
 ```bash
-rm -rf /tmp/skill-check
+rm -rf /tmp/skill-check && mkdir -p /tmp/skill-check
 pi -e ./extensions/agent/skill-tool --session-dir /tmp/skill-check --print "帮我润色这段文案：这个功能非常强大，可以有效地提升效率。"
 grep -o '"name":"skill","arguments":{[^}]*}' /tmp/skill-check/*.jsonl | head -3
 ```
@@ -108,7 +108,7 @@ grep -o '"name":"skill","arguments":{[^}]*}' /tmp/skill-check/*.jsonl | head -3
 
 ## 不做
 
-- `skill_search` / 分页检索：技能数在个位数，不需要
+- `skill_search` / 分页检索：当前技能数量少，不需要
 - `$skill` / 内联 `/skill:` 解析：Pi 原生已支持开头的 `/skill:name`
 - 可见性开关、权限策略
 - 每轮额外注入提醒消息：一次只改一个变量，否则无法归因
@@ -117,8 +117,7 @@ grep -o '"name":"skill","arguments":{[^}]*}' /tmp/skill-check/*.jsonl | head -3
 
 ## 测试
 
-`test/agent/skill-tool.test.ts` 覆盖目录文本（过滤、逐行格式、空输入、超长截断与被省略技能的名字、换行折叠与转义）、加载结果形状、`before_agent_start` 的
-清空与单次注册、无可见技能时不注册、工具未启用与运行时被停用时的降级、工具未命中与命中的返回内容、读文件失败的错误标记。运行方式见[根 README](../../../README.md#测试)。
+`test/agent/skill-tool.test.ts` 覆盖目录文本：过滤、逐行格式、空输入、超长截断与被省略技能的名字、换行折叠与转义。注册路径覆盖 `before_agent_start` 的清空与单次注册、无可见技能时不注册，以及工具未启用与运行时被停用时的降级。工具执行覆盖未命中与命中的返回内容、读文件失败的错误标记。加载结果形状另有用例。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

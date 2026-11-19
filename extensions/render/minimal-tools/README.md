@@ -68,7 +68,7 @@
 - 统计行：`└ Wrote 12 lines`
 - 预览默认最多 10 行，每行以 `+ ` 起头；超出显示截断提示；超宽行与 `edit` 一样折行
 
-### 表外工具
+### 其他工具
 
 未单独适配的工具尊重上游渲染：
 
@@ -100,7 +100,7 @@
 
 ## 实现原理
 
-- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`；先查定制表，再让位给上游，两者都没有时使用通用折叠。表外工具里，`UPSTREAM_RENDERER_TOOLS` 列出的搜索类工具在上游同时提供两个渲染槽时保留上游渲染器、只换成 self 壳并补 `outputPad` 缩进；缺一个槽时仍整体让位
+- 通过 `pi.registerToolRenderer` 提供 `renderCall` / `renderResult`；先查定制表，再让位给上游，两者都没有时使用通用折叠。这些工具中，`UPSTREAM_RENDERER_TOOLS` 列出的搜索类工具在上游同时提供两个渲染槽时保留上游渲染器、只换成 self 壳并补 `outputPad` 缩进；缺一个槽时仍整体让位
 - 只替换渲染，不替换执行：`bash` 的 `shellPath`、`PI_*` 环境变量等仍由 Pi 内置定义处理
 - 运行中计时保存在 `context.state`，每秒调用一次 `invalidate()`，结束时清除 interval
 - diff 配色按 `theme.appearance` 在深色 / 浅色两套 RGB 底色中切换
@@ -114,11 +114,11 @@
 - **主题切换**：思考标签颜色在 `session_start` 时取值，切换主题后需要 `/reload`；diff 底色只看明暗外观，自定义主题的配色可能与扩展不一致
 - **依赖 Pi 的渲染 API**：`registerToolRenderer`、`ToolRenderers`、`context.state`、`context.outputPad` 等结构变化时需要同步调整
 - **搜索类工具名是硬编码的**：`pi-web-access` 改名（含它的 `toolNames` 配置）后换壳静默失效，这些工具行会重新出现整块底色，渲染内容本身不受影响
-- **搜索类工具的错误底色由上游决定**：`pi-web-access` 的结果渲染只看 `details.error`，不看 `isError`；工具抛异常这类没有 `details.error` 的错误会渲染成正常状态行。本扩展不另铺底色——上游多数错误分支自带 `toolErrorBg` 块，再套一层会让一行出现两段底色
+- **搜索类工具的错误底色由上游决定**：`pi-web-access` 的结果渲染只看 `details.error`，不看 `isError`；工具抛异常这类没有 `details.error` 的错误会渲染成正常状态行。本扩展不另铺底色：上游多数错误分支自带 `toolErrorBg` 块，再套一层会让一行出现两段底色
 
 ## 测试
 
-`test/render/minimal-tools.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 行数截断与超宽折行（含续行对齐、折行上限与极窄宽度）、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../../README.md#测试)。
+`test/render/minimal-tools.test.ts` 覆盖调用行、running 计时、成功摘要、错误块与展开。diff 与预览覆盖行数截断、超宽折行、续行对齐、折行上限与极窄宽度。其他工具、图片回退、缺失参数、隐藏思考标签与搜索类工具的换壳各有用例。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

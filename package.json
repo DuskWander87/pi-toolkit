@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Pi coding agent 的终端界面扩展：工具调用折叠成一行摘要，用户与助手统一 2 列标记栏",
+	"description": "Pi coding agent 的扩展集合：工具调用折叠、2 列标记栏，以及把技能加载换成专用工具",
 	"license": "MIT",
 	"engines": {
 		"node": ">=22"
