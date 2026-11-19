@@ -1,0 +1,8 @@
+{
+	"name": "pi-toolkit-render",
+	"private": true,
+	"type": "module",
+	"pi": {
+		"extensions": ["./minimal-tools/index.ts", "./message-marks/index.ts", "./tool-run-groups/index.ts"]
+	}
+}

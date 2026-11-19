@@ -5,18 +5,31 @@
  */
 
 const results: Array<{ name: string; ok: boolean; detail?: string }> = [];
+/** 异步用例的 promise，由 finish 统一等待后再汇总。 */
+const pending: Promise<void>[] = [];
 
-export function check(name: string, fn: () => void): void {
-	try {
-		fn();
+export function check(name: string, fn: () => void | Promise<void>): void {
+	const pass = () => {
 		results.push({ name, ok: true });
-	} catch (error) {
+	};
+	const fail = (error: unknown) => {
 		results.push({ name, ok: false, detail: (error as Error).message });
+	};
+	try {
+		const outcome = fn();
+		if (outcome instanceof Promise) {
+			pending.push(outcome.then(pass, fail));
+			return;
+		}
+		pass();
+	} catch (error) {
+		fail(error);
 	}
 }
 
 /** 打印结果并以失败数决定退出码。 */
-export function finish(): never {
+export async function finish(): Promise<never> {
+	await Promise.all(pending);
 	const failed = results.filter((result) => !result.ok);
 	for (const result of results) {
 		console.log(`${result.ok ? "PASS" : "FAIL"}  ${result.name}${result.detail ? `\n      ${result.detail}` : ""}`);

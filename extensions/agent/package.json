@@ -1,0 +1,8 @@
+{
+	"name": "pi-toolkit-agent",
+	"private": true,
+	"type": "module",
+	"pi": {
+		"extensions": ["./skill-tool/index.ts"]
+	}
+}

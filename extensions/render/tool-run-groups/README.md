@@ -4,19 +4,19 @@
 
 ## 效果
 
-![三次工具调用收起后只剩一行摘要](../../assets/tool-run-groups.png)
+![三次工具调用收起后只剩一行摘要](../../../assets/tool-run-groups.png)
 
 <details>
 <summary>执行中：已完成部分收成摘要，正在跑的工具行留在摘要下方</summary>
 
-![执行中只多一条带实时计时的工具行](../../assets/tool-run-groups-running.png)
+![执行中只多一条带实时计时的工具行](../../../assets/tool-run-groups-running.png)
 
 </details>
 
 <details>
 <summary>展开后的时间线</summary>
 
-![Ctrl+O 展开后逐条显示工具调用](../../assets/tool-run-groups-expanded.png)
+![Ctrl+O 展开后逐条显示工具调用](../../../assets/tool-run-groups-expanded.png)
 
 </details>
 
@@ -95,7 +95,7 @@
 
 ## 安装
 
-安装、更新与卸载见[根 README](../../README.md#快速开始)。
+安装、更新与卸载见[根 README](../../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -131,8 +131,8 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 
 ## 测试
 
-`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、收起态思考正文的隐藏与展开恢复、执行中只收已结束的调用（含并行调用中先结束的，摘要按发起顺序汇总）、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../README.md#测试)。
+`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、收起态思考正文的隐藏与展开恢复、执行中只收已结束的调用（含并行调用中先结束的，摘要按发起顺序汇总）、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 
-返回 [pi-toolkit 根 README](../../README.md)。
+返回 [pi-toolkit 根 README](../../../README.md)。

@@ -4,7 +4,7 @@
 
 ## 效果
 
-![用户消息、思考、助手与工具行的标记栏](../../assets/message-marks.png)
+![用户消息、思考、助手与工具行的标记栏](../../../assets/message-marks.png)
 
 ```text
 › 先看一下测试脚本
@@ -81,7 +81,7 @@
 
 ## 安装
 
-安装、更新与卸载见[根 README](../../README.md#快速开始)。
+安装、更新与卸载见[根 README](../../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -124,8 +124,8 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 
 ## 测试
 
-`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../README.md#测试)。
+`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 
-返回 [pi-toolkit 根 README](../../README.md)。
+返回 [pi-toolkit 根 README](../../../README.md)。

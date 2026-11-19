@@ -6,7 +6,7 @@
 import assert from "node:assert";
 import { getSelectListTheme, initTheme, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences, visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
-import { PromptPrefixEditor } from "../extensions/message-marks/index.ts";
+import { PromptPrefixEditor } from "../extensions/render/message-marks/index.ts";
 import { check, finish } from "./harness.ts";
 
 initTheme("dark", false);

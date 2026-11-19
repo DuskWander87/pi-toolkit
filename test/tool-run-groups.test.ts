@@ -28,7 +28,7 @@ import extend, {
 	summarize,
 	thoughtLabel,
 	trackThinking,
-} from "../extensions/tool-run-groups/index.ts";
+} from "../extensions/render/tool-run-groups/index.ts";
 import { check, finish as finishSuite } from "./harness.ts";
 
 initTheme("dark", false);

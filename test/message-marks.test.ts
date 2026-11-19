@@ -24,7 +24,7 @@ import extend, {
 	installToolMarks,
 	installUserMessagePrefix,
 	prefixFirstContentLine,
-} from "../extensions/message-marks/index.ts";
+} from "../extensions/render/message-marks/index.ts";
 import { check, finish } from "./harness.ts";
 
 initTheme("dark", false);

@@ -1,10 +1,10 @@
 # pi-toolkit
 
-Terminal UI extensions for the Pi coding agent. They change rendering only: tool calls in a request collapse into one summary line, user, assistant, and tool content share a 2-column marker gutter, and `edit` / `write` show their changes by default. Models, tools, and session data stay untouched.
+Extensions for the Pi coding agent, split by where they change things: rendering extensions change only how a conversation is displayed, agent extensions change the agent's tools, prompt, or behavior. Each extension owns one directory, works on its own, and can be installed alone. Session data, config, and tool implementations stay untouched.
 
 The goal is to read a turn in fewer lines, then expand when you need detail.
 
-All three extensions replace parts of Pi's rendering layer. `tool-run-groups` takes over private methods of `InteractiveMode`, and everything is verified against Pi 1.5.2. A Pi upgrade may degrade or break them; see [Compatibility](#compatibility).
+Everything is verified against Pi 1.5.2 and every extension depends on Pi internals, so a Pi upgrade may degrade or break them; see [Compatibility](#compatibility).
 
 [中文](README.md) | English
 
@@ -12,7 +12,7 @@ All three extensions replace parts of Pi's rendering layer. `tool-run-groups` ta
 
 ![A request collapsed into a single summary line](assets/hero-collapsed.png)
 
-This screen uses all three extensions: `message-marks` draws the gutter, `tool-run-groups` writes the summary line, and `minimal-tools` renders the tool rows and diff.
+This screen layers three rendering extensions: `minimal-tools`, `message-marks`, and `tool-run-groups`.
 
 <details>
 <summary>Expanded timeline</summary>
@@ -23,13 +23,27 @@ This screen uses all three extensions: `message-marks` draws the gutter, `tool-r
 
 ## Extensions
 
+### Rendering
+
+`extensions/render/`, display only.
+
 | Extension | What it does |
 |---|---|
-| [minimal-tools](extensions/minimal-tools/README.md) | Two-stage tool calls: visible while running, one line when done; `edit` / `write` show changes by default |
-| [message-marks](extensions/message-marks/README.md) | 2-column gutter: `›` for user messages and the input, `●` for assistant text and tool calls |
-| [tool-run-groups](extensions/tool-run-groups/README.md) | Collapses a request's tool calls into one summary line with thinking time; click or `Ctrl+O` to expand |
+| [minimal-tools](extensions/render/minimal-tools/README.md) | How tool calls are displayed: visible while running, one line when done |
+| [message-marks](extensions/render/message-marks/README.md) | A 2-column gutter shared by user, assistant, and tools |
+| [tool-run-groups](extensions/render/tool-run-groups/README.md) | Collapses a request's tool calls into one summary line |
 
-Each extension works on its own. Behavior, keybindings, implementation notes, and limits live in the per-directory READMEs.
+### Agent behavior
+
+`extensions/agent/`, the agent's tools, prompt, and behavior.
+
+| Extension | What it does |
+|---|---|
+| [skill-tool](extensions/agent/skill-tool/README.md) | Turns skill loading into a dedicated tool, with the catalog in its description |
+
+How to pick: an extension that only changes display is rendering; one that changes the agent's tools, prompt, or behavior is agent. An extension that does both goes under agent, leaving rendering to the rendering extensions.
+
+Behavior, keybindings, implementation notes, and limits live in each directory's README instead of here. A new category directory needs a `package.json` that lists its entry points under `pi.extensions` and sets `"type": "module"`: Pi discovers extensions one level deep and skips a category directory without that manifest, and without the module type `moduleResolution: NodeNext` parses the directory as CommonJS.
 
 ## Getting started
 
@@ -39,7 +53,7 @@ Each extension works on its own. Behavior, keybindings, implementation notes, an
 pi install git:github.com/DuskWander87/pi-toolkit
 ```
 
-One command installs all three extensions. Check with `pi list`, then run `/reload` inside Pi or restart the session.
+One command installs every extension under `extensions/`. Check with `pi list`, then run `/reload` inside Pi or restart the session.
 
 To install a local clone instead:
 
@@ -76,9 +90,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 ## Compatibility
 
 - Verified against Pi 1.5.2; other versions are not promised
-- All three extensions depend on Pi internals: `minimal-tools` uses the tool renderer API, `message-marks` wraps exported component prototypes, and `tool-run-groups` takes over private `InteractiveMode` methods. A Pi upgrade may degrade or break them
-- Collapsed summaries drop the thinking text; expanding shows it. With `hideThinkingBlock` set to `true`, rounds inside a summary show neither the thinking text nor a clickable label; only the total time in the summary line remains. Turn that setting off to read the thinking text; the extensions never change it
-- Click to expand in `tool-run-groups` needs a terminal that reports mouse events. `Ctrl+O` always works
+- Every extension depends on Pi internals in its own place, so a Pi upgrade may degrade or break them. Each README lists its own dependency points under Limits
 
 ## Tests
 
@@ -89,7 +101,7 @@ npm run typecheck
 
 `npm run typecheck` runs TypeScript through npx; the first run needs network access and nothing is written to `node_modules`.
 
-Tests need `jiti`, `chalk`, the two host packages, and `@types/node` for the type check (it ships as a development dependency of the host packages, so it is not pulled in by the command above). On a fresh clone without `node_modules`, install them without touching `package.json`:
+Tests need `jiti`, `chalk`, and the two host packages; `typebox` is a devDependency in `package.json` and lands at the top of `node_modules` along with the host packages. The type check also needs `@types/node` (it ships as a development dependency of the host packages, so it is not pulled in by the command above). On a fresh clone without `node_modules`, install them without touching `package.json`:
 
 ```bash
 npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk @types/node
@@ -97,13 +109,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 
 Skip this step when `node_modules` already points at your Pi installation.
 
-| Test | Covers |
-|---|---|
-| `test/render.test.ts` | `minimal-tools`: tool rows, summaries, expansion, diff, unmatched tools, thinking label |
-| `test/message-marks.test.ts` | `message-marks`: user messages, assistant and tool markers, colors, line width |
-| `test/editor-prefix.test.ts` | `message-marks`: input prefix, width, cursor |
-| `test/tool-run-groups.test.ts` | `tool-run-groups`: grouping, boundaries, summary text, expansion, clicks |
-| `test/integration.test.ts` | all three extensions together: gutter alignment and silent-turn visibility |
+Tests are split by extension under `test/`, with the covered cases spelled out in the case names; `test/integration.test.ts` covers several extensions installed together.
 
 ## License
 

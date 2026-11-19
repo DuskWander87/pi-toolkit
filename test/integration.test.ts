@@ -12,9 +12,9 @@ import {
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Text, stripTerminalSequences } from "@earendil-works/pi-tui";
-import installMessageMarks from "../extensions/message-marks/index.ts";
-import installMinimalTools from "../extensions/minimal-tools/index.ts";
-import { ToolRunSummary, groupSilentTurns, groupToolRuns } from "../extensions/tool-run-groups/index.ts";
+import installMessageMarks from "../extensions/render/message-marks/index.ts";
+import installMinimalTools from "../extensions/render/minimal-tools/index.ts";
+import { ToolRunSummary, groupSilentTurns, groupToolRuns } from "../extensions/render/tool-run-groups/index.ts";
 import { check, finish } from "./harness.ts";
 
 initTheme("dark", false);

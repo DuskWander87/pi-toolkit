@@ -4,7 +4,7 @@
 
 ## 效果
 
-![工具行的执行中与收起态](../../assets/minimal-tools.png)
+![工具行的执行中与收起态](../../../assets/minimal-tools.png)
 
 ```text
 执行中
@@ -84,7 +84,7 @@
 
 ## 安装
 
-安装、更新与卸载见[根 README](../../README.md#快速开始)。
+安装、更新与卸载见[根 README](../../../README.md#快速开始)。
 
 ## 交互与配置
 
@@ -118,8 +118,8 @@
 
 ## 测试
 
-`test/render.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 行数截断与超宽折行（含续行对齐、折行上限与极窄宽度）、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../README.md#测试)。
+`test/render.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 行数截断与超宽折行（含续行对齐、折行上限与极窄宽度）、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 
-返回 [pi-toolkit 根 README](../../README.md)。
+返回 [pi-toolkit 根 README](../../../README.md)。
