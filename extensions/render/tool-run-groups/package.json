@@ -1,0 +1,20 @@
+{
+	"name": "pi-toolkit-tool-run-groups",
+	"version": "0.1.0",
+	"description": "Pi coding agent 的请求级工具折叠：同一请求的工具调用合成一行摘要",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DuskWander87/pi-toolkit.git",
+		"directory": "extensions/render/tool-run-groups"
+	},
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts"],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	}
+}

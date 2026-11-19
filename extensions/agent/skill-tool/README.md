@@ -53,11 +53,26 @@ skill 工具的描述
 
 ## 安装
 
-安装、更新与卸载见[根 README](../../../README.md#快速开始)。只试用一次：
+在 clone 的上级目录执行；已经有仓库时跳过 `git clone`：
 
 ```bash
-pi -e ./extensions/agent/skill-tool
+git clone https://github.com/DuskWander87/pi-toolkit
+pi install ./pi-toolkit/extensions/agent/skill-tool
 ```
+
+只试用一次，不写入配置：
+
+```bash
+pi -e ./pi-toolkit/extensions/agent/skill-tool
+```
+
+卸载：
+
+```bash
+pi remove ./pi-toolkit/extensions/agent/skill-tool
+```
+
+更新时在 clone 目录执行 `git pull`，然后在 Pi 中 `/reload`。装齐全部扩展见[根 README](../../../README.md#快速开始)。
 
 ## 验证
 

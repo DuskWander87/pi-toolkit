@@ -1,0 +1,20 @@
+{
+	"name": "pi-toolkit-minimal-tools",
+	"version": "0.1.0",
+	"description": "Pi coding agent 的工具行两阶段显示：执行中可见，结束后收成一行摘要",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DuskWander87/pi-toolkit.git",
+		"directory": "extensions/render/minimal-tools"
+	},
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts"],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	}
+}

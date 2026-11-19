@@ -1,0 +1,20 @@
+{
+	"name": "pi-toolkit-message-marks",
+	"version": "0.1.0",
+	"description": "Pi coding agent 的 2 列标记栏：用户、助手与工具消息共用左侧标记",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DuskWander87/pi-toolkit.git",
+		"directory": "extensions/render/message-marks"
+	},
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts"],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	}
+}
