@@ -109,7 +109,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 
 Skip this step when `node_modules` already points at your Pi installation.
 
-Tests are split by extension under `test/`, with the covered cases spelled out in the case names; `test/integration.test.ts` covers several extensions installed together.
+Tests live under `test/`, mirroring the `extensions/` directories (`test/render/*.test.ts`, `test/agent/*.test.ts`): one file per extension, with the covered cases spelled out in the case names; `test/integration.test.ts` covers several extensions installed together.
 
 ## License
 

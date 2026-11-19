@@ -109,7 +109,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 
 本机已经把 `node_modules` 指向 Pi 安装目录时，跳过这一步。
 
-测试按扩展分文件放在 `test/` 下，覆盖项写在用例名里；`test/integration.test.ts` 覆盖多个扩展同时安装。
+测试放在 `test/` 下，文件与 `extensions/` 的目录一一对应（`test/render/*.test.ts`、`test/agent/*.test.ts`），一个扩展一个测试文件，覆盖项写在用例名里；`test/integration.test.ts` 覆盖多个扩展同时安装。
 
 ## 许可
 

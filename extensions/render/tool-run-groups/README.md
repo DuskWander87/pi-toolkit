@@ -23,7 +23,7 @@
 ```text
 收起
   Thought for 12s, ran 3 shell commands
-● edit test/render.test.ts
+● edit test/render/minimal-tools.test.ts
   └ Added 2 lines, removed 1 line
   ... (4 more lines, ctrl+o to expand)
 
@@ -131,7 +131,7 @@ Pi 没有消息级渲染钩子（`registerMessageRenderer` 只处理 `custom` �
 
 ## 测试
 
-`test/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、收起态思考正文的隐藏与展开恢复、执行中只收已结束的调用（含并行调用中先结束的，摘要按发起顺序汇总）、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../../README.md#测试)。
+`test/render/tool-run-groups.test.ts` 覆盖单轮与请求级聚合、静默轮次判定、边界（文本回复 / 报错 / 中断 / 用户消息）、摘要文案、失败标红、思考耗时、收起态思考正文的隐藏与展开恢复、执行中只收已结束的调用（含并行调用中先结束的，摘要按发起顺序汇总）、展开状态传递、点击行为与实例复用。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

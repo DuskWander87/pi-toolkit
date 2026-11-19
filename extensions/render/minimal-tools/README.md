@@ -118,7 +118,7 @@
 
 ## 测试
 
-`test/render.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 行数截断与超宽折行（含续行对齐、折行上限与极窄宽度）、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../../README.md#测试)。
+`test/render/minimal-tools.test.ts` 覆盖调用行、running 计时、成功摘要、错误块、展开、edit / write 行数截断与超宽折行（含续行对齐、折行上限与极窄宽度）、表外工具、图片回退、缺失参数与隐藏思考标签。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

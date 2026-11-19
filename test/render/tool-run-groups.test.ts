@@ -28,8 +28,8 @@ import extend, {
 	summarize,
 	thoughtLabel,
 	trackThinking,
-} from "../extensions/render/tool-run-groups/index.ts";
-import { check, finish as finishSuite } from "./harness.ts";
+} from "../../extensions/render/tool-run-groups/index.ts";
+import { check, finish as finishSuite } from "../harness.ts";
 
 initTheme("dark", false);
 extend({ on() {}, registerTool() {} } as any);

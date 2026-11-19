@@ -7,8 +7,8 @@ import assert from "node:assert";
 import { homedir } from "node:os";
 import chalk from "chalk";
 import { Box, stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
-import extend from "../extensions/render/minimal-tools/index.ts";
-import { check, finish } from "./harness.ts";
+import extend from "../../extensions/render/minimal-tools/index.ts";
+import { check, finish } from "../harness.ts";
 
 const usedColors = new Set<string>();
 const theme = {

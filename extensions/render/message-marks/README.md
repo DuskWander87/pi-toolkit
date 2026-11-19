@@ -124,7 +124,7 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 
 ## 测试
 
-`test/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进与重复安装；`test/editor-prefix.test.ts` 覆盖输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../../README.md#测试)。
+`test/render/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进、块间距与重复安装，以及输入框前缀、宽度、光标与工作状态。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

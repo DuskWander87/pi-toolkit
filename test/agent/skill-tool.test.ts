@@ -8,8 +8,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Skill } from "@earendil-works/pi-coding-agent";
-import extend, { buildCatalog, formatLoadResult } from "../extensions/agent/skill-tool/index.ts";
-import { check, finish } from "./harness.ts";
+import extend, { buildCatalog, formatLoadResult } from "../../extensions/agent/skill-tool/index.ts";
+import { check, finish } from "../harness.ts";
 
 const MAX_CATALOG_CHARS = 8000;
 

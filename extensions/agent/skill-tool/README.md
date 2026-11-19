@@ -117,7 +117,7 @@ grep -o '"name":"skill","arguments":{[^}]*}' /tmp/skill-check/*.jsonl | head -3
 
 ## 测试
 
-`test/skill-tool.test.ts` 覆盖目录文本（过滤、逐行格式、空输入、超长截断与被省略技能的名字、换行折叠与转义）、加载结果形状、`before_agent_start` 的
+`test/agent/skill-tool.test.ts` 覆盖目录文本（过滤、逐行格式、空输入、超长截断与被省略技能的名字、换行折叠与转义）、加载结果形状、`before_agent_start` 的
 清空与单次注册、无可见技能时不注册、工具未启用与运行时被停用时的降级、工具未命中与命中的返回内容、读文件失败的错误标记。运行方式见[根 README](../../../README.md#测试)。
 
 ---
