@@ -1,8 +1,8 @@
 # message-marks
 
-2 列标记栏：标记占第 1 列，内容统一缩进 2 列。
+2 列标记栏：标记占第 1 列，内容统一缩进 2 列。只包装 Pi 导出的组件原型，不改任何消息数据。
 
-## 效果
+## 预览
 
 ![用户消息、思考、助手与工具行的标记栏](../../../assets/message-marks.png)
 
@@ -19,7 +19,9 @@
 
 输入框首行也以 `› ` 起头，多行输入在等宽留白后对齐。
 
-## 标记规则
+## 特性
+
+### 标记规则
 
 | 位置 | 标记 | 颜色 |
 |---|---|---|
@@ -31,17 +33,14 @@
 | 技能调用首行 | `●` | 固定蓝 `rgb(86,156,214)` |
 | `!` 命令、压缩/分支摘要、自定义消息 | 无（只缩进） | 不加标记 |
 
-## 对齐方式
+### 对齐
 
 - 标记栏固定 2 列：第 1 列放标记，第 2 列为空格
 - 助手消息与工具块的每一行都补到第 2 列；首行用标记替换原有的两格留白
 - 用户消息只在首个内容行插入前缀，后续行补等量空格，使内容从同一列开始
 - 系统类组件每行补到第 2 列；原本就满宽的边框或自定义输出会截回原宽度
 - 块与块之间统一留 1 行空行：每个块去掉尾随空行，跟在 Pi `Spacer(1)` 后面的块（用户消息、技能调用、压缩/分支摘要）不再保留自身首行空行；块首或块尾挨着终端图片时，那一侧保持原样（图片行与它的占位空行是图片自身的高度）
-- 插入空格后从行尾回收等量空格，整行可见宽度不变
 - 代码块、列表等已有缩进保持相对结构；终端图片行（Kitty / iTerm2 协议）不参与缩进与标记
-
-## 行为
 
 ### 用户消息
 
@@ -62,38 +61,23 @@
 
 ### 输入框
 
-通过 `CustomEditor` 子类 `PromptPrefixEditor` 实现：
-
 - `› ` 前缀占用左侧内边距，不叠加在文本上
 - 换行宽度、光标位置与鼠标定位都按加宽后的内边距计算
-- 对外仍是调用方设置的宽度：`getPaddingX()` 返回原值，`setPaddingX()` 自动加上 2
 - 窄终端下内边距不足以容纳前缀时保持原样
 - 保留 Pi 默认输入框的工作状态嵌入上边框
 
 ## 安装
 
-在 clone 的上级目录执行；已经有仓库时跳过 `git clone`：
-
 ```bash
 git clone https://github.com/DuskWander87/pi-toolkit
-pi install ./pi-toolkit/extensions/render/message-marks
+pi install ./pi-toolkit/extensions/render/message-marks   # 安装
+pi -e ./pi-toolkit/extensions/render/message-marks        # 只试用一次，不写入配置
+pi remove ./pi-toolkit/extensions/render/message-marks    # 卸载
 ```
 
-只试用一次，不写入配置：
+在 clone 的上级目录执行，已经有仓库时跳过 `git clone`。更新时在 clone 目录执行 `git pull`，然后在 Pi 中 `/reload`。装齐全部扩展见[根 README](../../../README.md#快速开始)。
 
-```bash
-pi -e ./pi-toolkit/extensions/render/message-marks
-```
-
-卸载：
-
-```bash
-pi remove ./pi-toolkit/extensions/render/message-marks
-```
-
-更新时在 clone 目录执行 `git pull`，然后在 Pi 中 `/reload`。装齐全部扩展见[根 README](../../../README.md#快速开始)。
-
-## 交互与配置
+## 用法
 
 - 没有快捷键、命令或配置项，安装后直接生效
 - 输入框的按键、自动补全与鼠标行为沿用 Pi 默认实现
@@ -103,26 +87,16 @@ pi remove ./pi-toolkit/extensions/render/message-marks
 - 单独安装即可工作
 - 与 `tool-run-groups` 共用 2 列标记栏宽度：摘要行由 `tool-run-groups` 自己缩进到第 2 列，本扩展不为它加圆点
 - 与 `minimal-tools` 一起装时，本扩展负责工具行的缩进与圆点，`minimal-tools` 负责行内内容；此时 Pi 的 `outputPad` 不再影响工具行左缘（固定在第 2 列），只决定行内可用换行宽度
-- 输入框通过 `setEditorComponent` 接管；如果另一个扩展之后也调用 `setEditorComponent`，后注册的编辑器会覆盖本扩展，两者共存时需要包一层工厂
-
-## 实现原理
-
-Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `custom` 消息），因此本扩展包装导出的组件原型：
-
-- `UserMessageComponent.render`：去背景色 + 首行前缀
-- `AssistantMessageComponent.render`：整条消息对齐 + 首个文本块圆点
-- `ToolExecutionComponent.render`：整块对齐 + 状态圆点
-- `SkillInvocationMessageComponent.render`：去背景色 + 整块对齐 + 圆点
-- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`：统一补缩进，满宽行截回原宽度；压缩/分支摘要位于 `Spacer(1)` 之后，不再保留首行空行
-- 每个块渲染后由 `normalizeBlockSpacing` 收敛首尾空行，被删掉空行上的 OSC 133 分区标记挂回相邻行
-- `ctx.ui.setEditorComponent`：注册 `PromptPrefixEditor`
-
-安装时把原始 `render` 保存在 `Symbol.for` 键上，重复安装（含同进程 `/reload`）用新 wrapper 覆盖旧的，不会叠加；从没有保存原始方法的旧版本第一次升级后需要重启一次 Pi，之后 `/reload` 即可。渲染结果按组件缓存，内容未变时省去逐行正则与宽度计算。主题代理在 `session_start` 取得，切换主题后工具圆点颜色仍跟随。
 
 ## 限制
 
-- **依赖组件内部结构**：助手圆点的位置读取 `contentContainer.mouseLayout` 与 `markdownSlots`；Pi 更新若改变这些字段，圆点会退化或错位
-- **固定 2 列**：没有可配置的标记栏宽度
+### 依赖
+
+- 组件内部结构：助手圆点的位置读取 `contentContainer.mouseLayout` 与 `markdownSlots`；Pi 更新若改变这些字段，圆点会退化或错位
+- 输入框通过 `ctx.ui.setEditorComponent` 接管；如果另一个扩展之后也调用 `setEditorComponent`，后注册的编辑器会覆盖本扩展，两者共存时需要包一层工厂
+
+### 已知问题
+
 - **成功蓝是固定 RGB**：主题没有蓝色令牌，无法随自定义主题变化
 - **只标第一个文本块**：一条助手消息中的后续文本块不加圆点
 - **图片行不缩进**：终端图片自带单元格定位，保持原样
@@ -130,7 +104,24 @@ Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `cust
 - **`outputPad=0` 时满宽工具行会丢字**：`minimal-tools` 的自壳工具行在 `outputPad=0` 下没有行尾留白可回收，为腾出 2 列标记栏会在行尾截掉最多 2 个字符；`outputPad=1`（默认值）时行尾留下 1 列可回收，不截断
 - **Pi 直接插入的提示行紧贴上一块**：扩展报错这类不是消息组件的行由 Pi 直接追加，本扩展不参与，与上一块之间没有空行
 - **代码块相对缩进少 1 列**：正文移到第 2 列后，块内相对缩进比原来少 1 列
-- **输入框可能被覆盖**：其他扩展后注册编辑器时会失效，见「与其他扩展」
+
+### 非目标
+
+- 固定 2 列：没有可配置的标记栏宽度
+
+## 实现原理
+
+包装导出的组件原型，Pi 没有普通消息的渲染钩子（`registerMessageRenderer` 只处理 `custom` 消息）：
+
+- `UserMessageComponent.render`：去背景色 + 首行前缀
+- `AssistantMessageComponent.render`：整条消息对齐 + 首个文本块圆点
+- `ToolExecutionComponent.render`：整块对齐 + 状态圆点
+- `SkillInvocationMessageComponent.render`：去背景色 + 整块对齐 + 圆点
+- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`：统一补缩进，满宽行截回原宽度；压缩/分支摘要位于 `Spacer(1)` 之后，不再保留首行空行
+- 每个块渲染后由 `normalizeBlockSpacing` 收敛首尾空行，被删掉空行上的 OSC 133 分区标记挂回相邻行
+- 输入框由 `CustomEditor` 子类 `PromptPrefixEditor` 实现：`getPaddingX()` 返回原值，`setPaddingX()` 自动加上 2，对外仍是调用方设置的宽度
+
+安装时把原始 `render` 保存在 `Symbol.for` 键上，重复安装（含同进程 `/reload`）用新 wrapper 覆盖旧的，不会叠加；从没有保存原始方法的旧版本第一次升级后需要重启一次 Pi，之后 `/reload` 即可。渲染结果按组件缓存，内容未变时省去逐行正则与宽度计算。主题代理在 `session_start` 取得，切换主题后工具圆点颜色仍跟随。
 
 ## 测试
 
