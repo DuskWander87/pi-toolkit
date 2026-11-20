@@ -10,7 +10,7 @@ Version and dependency scope: see [Compatibility](#compatibility).
 
 ## What it looks like
 
-![A request collapsed into a single summary line](assets/hero-collapsed.png)
+![Tool calls collapsed into a single summary line](assets/hero-collapsed.png)
 
 This screen layers three rendering extensions: `minimal-tools`, `message-marks`, and `tool-run-groups`.
 
@@ -31,7 +31,7 @@ This screen layers three rendering extensions: `minimal-tools`, `message-marks`,
 |---|---|
 | [minimal-tools](extensions/render/minimal-tools/README.md) | How tool calls are displayed: visible while running, one line when done |
 | [message-marks](extensions/render/message-marks/README.md) | A 2-column gutter shared by user, assistant, and tools |
-| [tool-run-groups](extensions/render/tool-run-groups/README.md) | Collapses a request's tool calls into one summary line |
+| [tool-run-groups](extensions/render/tool-run-groups/README.md) | Collapses tool calls into one summary line, restarting after a reply |
 
 ### Agent behavior
 

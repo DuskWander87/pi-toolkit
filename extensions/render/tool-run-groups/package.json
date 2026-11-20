@@ -1,7 +1,7 @@
 {
 	"name": "pi-toolkit-tool-run-groups",
 	"version": "0.1.0",
-	"description": "Pi coding agent 的请求级工具折叠：同一请求的工具调用合成一行摘要",
+	"description": "Pi coding agent 的工具调用折叠：连续调用合成一行摘要，回复正文之后另起一行",
 	"type": "module",
 	"license": "MIT",
 	"repository": {

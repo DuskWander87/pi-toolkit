@@ -4,15 +4,15 @@
  * 两级聚合，把工具调用收成摘要行（Claude Code 风格）。
  *
  * 第一级——单轮工具行 `ToolRunGroup`：同一轮助手回复里连续且都已结束的工具行收成
- * 一行，`edit` / `write` 不参与，单条调用留给请求级摘要行。
+ * 一行，`edit` / `write` 不参与，单条调用留给区间摘要行。
  *
- * 第二级——请求摘要 `ToolRunSummary`：一个用户请求内的思考、工具调用与回复正文只留
- * 一行摘要，耗时按轮累加。正文照常逐条渲染在摘要行下方，但不再各自附带一行
- * `Thought for Ns`；被中断或报错的轮次是硬边界。`edit` / `write` 行参与区间，但
- * 摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
+ * 第二级——区间摘要 `ToolRunSummary`：一段工具调用只留一行摘要，耗时按轮累加。
+ * 带正文的回复是硬边界：正文先于摘要行渲染，它之后的思考与工具调用另起一行摘要，
+ * 不并入上面那一行；被中断或报错的轮次同样是硬边界。`edit` / `write` 行参与区间，
+ * 但摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
- * 收起时思考正文不占行：摘要行已经统计过耗时，区间内的轮次与区间前那条带正文的
- * 回复都只留正文；展开后显示思考正文，Pi 的 `hideThinkingBlock` 为 `true` 时这些
+ * 收起时思考正文不占行：摘要行已经统计过耗时，区间内的静默轮次与区间前那条带正文
+ * 的回复都只留正文；展开后显示思考正文，Pi 的 `hideThinkingBlock` 为 `true` 时这些
  * 轮次不显示任何思考内容（耗时只在摘要行上）。
  *
  * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具行不折叠，留在摘要
@@ -190,17 +190,14 @@ function clearAbsorbedThoughtLabels(items: readonly Component[]): void {
  * `false` —— 退化到不合并，比错误地藏起内容安全。
  */
 export function isSilentTurn(value: unknown): boolean {
-	if (!isFoldableAssistant(value)) return false;
+	if (!isSettledAssistant(value)) return false;
 	const internals = value as AssistantInternals;
 	if (!Array.isArray(internals.markdownSlots)) return false;
 	return !internals.markdownSlots.some((slot) => slot.kind === "text");
 }
 
-/**
- * 可以进入折叠区间的助手消息：思考轮次与带正文的回复都折叠，
- * 只要不是中断、报错或截断的轮次。正文在收起态照常渲染，只是不再单独占一行耗时标签。
- */
-function isFoldableAssistant(value: unknown): boolean {
+/** 已正常结束的助手消息：中断、报错与截断的轮次自带提示文本，不能折叠。 */
+function isSettledAssistant(value: unknown): boolean {
 	if (!(value instanceof AssistantMessageComponent)) return false;
 	const stopReason = (value as unknown as AssistantInternals).lastMessage?.stopReason;
 	return stopReason !== "error" && stopReason !== "aborted" && stopReason !== "length";
@@ -347,9 +344,9 @@ export interface ToolRunSummaryOptions {
 }
 
 /**
- * 一次请求里工具调用的摘要行 + 折叠内的时间线。
+ * 一段工具调用的摘要行 + 折叠内的时间线。
  *
- * 带可见文本的助手消息进入区间，正文照常渲染在摘要行下方，不再各自附带耗时标签。
+ * 带可见文本的助手消息是区间边界：正文在摘要行之前渲染，不进入折叠。
  * 收起时思考正文一并隐去，展开后回到 Pi 的设置；区间前那条回复的思考同样收在
  * 摘要行里。`edit` / `write` 行参与区间但不被摘要行代表：摘要收起时它们仍逐条渲染。
  * 摘要内容每次渲染时从子组件重新累计，因此执行中/失败/主题切换都会即时反映；
@@ -408,7 +405,7 @@ export class ToolRunSummary extends Container {
 
 	/**
 	 * 收起时思考由摘要行代表；展开后按 Pi 的设置显示。
-	 * `extraThought` 在摘要之外单独渲染，同样归这里管。
+	 * `extraThought` 在摘要之外渲染，思考可见性同样归这里管。
 	 */
 	private syncThinkingVisibility(): void {
 		const hidden = !this.expandedState || this.piHidden;
@@ -422,7 +419,7 @@ export class ToolRunSummary extends Container {
 			this.soloLayout = [];
 			return ["", summary, ...super.render(width)];
 		}
-		// 普通工具段由摘要行代表；正文与改动行不靠摘要行代表，收起时也逐条渲染。
+		// 普通工具段由摘要行代表；改动行不靠摘要行代表，收起时也逐条渲染。
 		const body: string[] = [];
 		const layout: Array<{ child: Component; start: number; height: number }> = [];
 		let top = 2; // 空行 + 摘要行
@@ -519,18 +516,14 @@ function isSoloRow(value: unknown): boolean {
 	return isToolRow(value) && SOLO_TOOLS.has(String(value.toolName));
 }
 
-/** 折叠区间里允许出现的项：任何工具段，以及没有中断报错的助手消息。 */
-function isAbsorbable(value: unknown): boolean {
-	return isToolSegment(value) || isFoldableAssistant(value);
-}
-
 /**
- * 区间只能从工具段或静默轮次开头。
+ * 区间由工具段与静默轮次组成，两者都既可作为区间开头，也可接在区间中间。
  *
- * 带正文的回复若开启区间，摘要行会跑到它上方；这种回复留在区间外，
- * 既作为 `extraThought` 贡献耗时，也让正文先于摘要行出现。
+ * 带正文的回复是硬边界：它留在区间外，既作为 `extraThought` 贡献耗时，也让正文先于
+ * 摘要行出现；它之后的思考与工具调用另起一行摘要，不会算进它上方那一行。
+ * 中断、报错与截断的轮次同样不在区间内。
  */
-function isRegionStart(value: unknown): boolean {
+function isAbsorbable(value: unknown): boolean {
 	return isToolSegment(value) || isSilentTurn(value);
 }
 
@@ -555,14 +548,10 @@ function countedSegments(items: readonly Component[]): number {
 }
 
 /**
- * 从 `index` 读一段可折叠区间：连续的工具段与静默助手消息。
- *
- * 带可见文本的助手消息、中断报错的轮次与其他组件都是硬边界。区间可以由工具段
- * 开头——请求开头那条带文本的回复留在区间外，它引发的工具调用仍并入同一个摘要，
- * 因此同一条回复与下一条回复之间只有一行摘要。
+ * 从 `index` 读一段可折叠区间：连续的工具段与静默轮次。
  */
 function readRegion(children: readonly Component[], index: number): Region | undefined {
-	if (!isRegionStart(children[index])) return undefined;
+	if (!isAbsorbable(children[index])) return undefined;
 	const items: Component[] = [];
 	let cursor = index;
 	while (cursor < children.length && isAbsorbable(children[cursor])) items.push(children[cursor++]!);
@@ -576,8 +565,8 @@ function sameItems(left: readonly Component[], right: readonly Component[]): boo
 /**
  * 把 `chatContainer` 里可折叠的工具调用区间合并成 `ToolRunSummary`。
  *
- * 区间由连续的普通工具段与助手消息组成，可以由工具段开头：请求开头那条带正文
- * 的回复留在区间外，它引发的调用仍并入同一行，所以一个请求只留一行摘要。
+ * 区间由连续的普通工具段与静默轮次组成，可以由工具段开头：回复正文留在区间外，
+ * 它引发的调用收成一行摘要，下一条正文之后的调用另起一行。
  * `edit` / `write` 行与报错或中断的轮次是硬边界。
  *
  * 区间里已结束的部分（含并行调用中先结束的）收进摘要行，执行中的工具行留在
@@ -635,7 +624,7 @@ export function groupSilentTurns(
 		// 报错 / 中断的轮次是硬边界，保留自己的耗时标签。
 		const preceding = flat[index - 1];
 		const extraThought =
-			preceding instanceof AssistantMessageComponent && isFoldableAssistant(preceding)
+			preceding instanceof AssistantMessageComponent && isSettledAssistant(preceding)
 				? preceding
 				: undefined;
 		const thoughtFor = options.thoughtMsFor ?? thoughtFromMessage;
@@ -758,7 +747,7 @@ export function finishMessage(mode: GroupableMode, event: unknown): void {
 
 	if (assistant && thoughtMs !== undefined) thoughtByMessage.set(assistant, thoughtMs);
 
-	// 纯文本回复也要重扫：它可能紧跟在已折叠的请求后面，需要并入同一行摘要。
+	// 静默轮次的耗时一结束就计入所在摘要；带正文的回复是边界，重扫让它留在区间外。
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 	mode.ui?.requestRender?.();
@@ -774,7 +763,7 @@ function lastAssistantChild(mode: GroupableMode): Component | undefined {
 	return undefined;
 }
 
-/** 重新扫描一次：先做单轮聚合，再做请求级摘要。 */
+/** 重新扫描一次：先做单轮聚合，再做区间摘要。 */
 export function refreshToolRuns(mode: GroupableMode): void {
 	groupToolRuns(mode);
 	groupSilentTurns(mode);

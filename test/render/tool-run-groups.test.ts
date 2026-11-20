@@ -291,7 +291,7 @@ check("显示思考时，收起态也不渲染静默轮次的思考正文", () =
 	assert.ok(expanded.join("\n").includes("这是一段很长的思考正文"), JSON.stringify(expanded));
 });
 
-check("带正文的助手消息收起时保留正文、隐去思考，展开后恢复", () => {
+check("带正文的回复把区间分成两行摘要，正文留在两行之间", () => {
 	const answer = assistantRow({
 		thinking: "思考正文",
 		text: "我发现了问题",
@@ -307,15 +307,21 @@ check("带正文的助手消息收起时保留正文、隐去思考，展开后�
 	]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
-	const summary = summariesOf(mode)[0]!;
+	const [before, after] = summariesOf(mode);
 
-	const collapsed = plain(summary.render(WIDTH)).join("\n");
-	assert.ok(collapsed.includes("我发现了问题"), collapsed);
-	// 收起时由摘要行代表思考：正文保留，思考正文不占行。
-	assert.equal(collapsed.includes("思考正文"), false, collapsed);
+	assert.equal(mode.chatContainer.children.indexOf(before!), 0);
+	assert.equal(mode.chatContainer.children.indexOf(answer), 1, "正文紧跟在它上方那行摘要后");
+	assert.equal(mode.chatContainer.children.indexOf(after!), 2, "正文之后的调用另起一行摘要");
+	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
 
-	summary.setExpanded(true);
-	assert.ok(plain(summary.render(WIDTH)).join("\n").includes("思考正文"));
+	const rendered = () => plain(mode.chatContainer.render(WIDTH)).join("\n");
+	assert.ok(rendered().includes("我发现了问题"), rendered());
+	// 收起时由下面那行摘要代表思考：正文保留，思考正文不占行。
+	assert.equal(rendered().includes("思考正文"), false, rendered());
+
+	after!.setExpanded(true);
+	assert.ok(rendered().includes("思考正文"), rendered());
 });
 
 check("区间前那条带正文的回复收起时同样隐去思考", () => {
@@ -344,7 +350,7 @@ check("收起时被隐去的思考不残留 Thinking... 占位", () => {
 	assert.equal(lines.includes("Thinking..."), false, lines);
 });
 
-check("最终纯文本回复并入摘要并计入耗时", () => {
+check("最终纯文本回复留在摘要外，保留自己的耗时标签", () => {
 	const realNow = Date.now;
 	let now = 1000;
 	Date.now = () => now;
@@ -353,8 +359,7 @@ check("最终纯文本回复并入摘要并计入耗时", () => {
 		groupToolRuns(mode);
 		groupSilentTurns(mode);
 
-		const final = assistantRow({ text: "已经修好了。" });
-		applyThoughtLabel(final, 900);
+		const final = assistantRow({ thinking: "补充说明", text: "已经修好了。" });
 		mode.chatContainer.addChild(final);
 
 		trackThinking({ type: "message_start", message: { role: "assistant" } });
@@ -366,17 +371,25 @@ check("最终纯文本回复并入摘要并计入耗时", () => {
 		now = 2400;
 		finishMessage(mode, {
 			type: "message_end",
-			message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "已经修好了。" }] },
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [
+					{ type: "thinking", thinking: "补充说明" },
+					{ type: "text", text: "已经修好了。" },
+				],
+			},
 		});
 
 		const summaries = summariesOf(mode);
 		assert.equal(summaries.length, 1);
-		assert.equal(summaries[0]!.children.includes(final), true, "最终回复应并入摘要");
+		assert.equal(summaries[0]!.children.includes(final), false, "最终回复不并入摘要");
+		assert.equal(mode.chatContainer.children.at(-1), final, "最终回复留在摘要下方");
 		const lines = plain(summaries[0]!.render(WIDTH));
-		assert.equal(lines[1]!.trimStart(), "Thought for 1s, ran 2 shell commands", JSON.stringify(lines));
-		assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
-		assert.equal(lines.join("\n").includes("已经修好了。"), true, JSON.stringify(lines));
-		assert.equal((final as any).hiddenThinkingLabel, "", "并入摘要后清空耗时标签");
+		assert.equal(lines[1]!.trimStart(), "ran 2 shell commands", "最终回复的耗时不算进上方摘要");
+		const reply = plain(final.render(WIDTH)).join("\n");
+		assert.ok(reply.includes("已经修好了。"), reply);
+		assert.ok(reply.includes("Thought for 1s"), reply);
 	} finally {
 		Date.now = realNow;
 	}
@@ -509,35 +522,6 @@ check("单条工具调用与思考合成一行摘要，消息标记不再单独�
 	const lines = plain(summaries[0]!.render(WIDTH));
 	assert.equal(lines.length, 2, JSON.stringify(lines));
 	assert.equal(lines[1]!.trimStart(), "Thought for 1s, ran 1 read call");
-});
-
-check("请求中间带文本的回复并入同一区间", () => {
-	const mode = fakeMode([
-		assistantRow({}),
-		finishedBash("c1", "ls"),
-		finishedBash("c2", "pwd"),
-		assistantRow({}),
-		finishedBash("c3", "id"),
-		finishedBash("c4", "date"),
-		assistantRow({ text: "我发现了问题" }),
-		assistantRow({}),
-		finishedBash("c5", "cat a"),
-		finishedBash("c6", "cat b"),
-		assistantRow({}),
-		finishedBash("c7", "grep x"),
-		finishedBash("c8", "grep y"),
-	]);
-	groupToolRuns(mode);
-	groupSilentTurns(mode);
-
-	assert.equal(summariesOf(mode).length, 1);
-	assert.equal(mode.chatContainer.children.length, 1);
-	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
-	assert.equal(lines[1]!.trimStart(), "ran 8 shell commands");
-	assert.ok(
-		lines.some((line) => line.includes("我发现了问题")),
-		JSON.stringify(lines),
-	);
 });
 
 check("同一请求的工具段随轮次增长合入同一行摘要", () => {
@@ -832,30 +816,42 @@ check("工具结束后并入同一行摘要", () => {
 	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 3 shell commands");
 });
 
-check("带正文的轮次并入同一区间，正文在收起态可见", () => {
+check("请求中间的正文把区间分段，每段各一行摘要", () => {
+	const answer = assistantRow({ text: "我发现了问题" });
 	const mode = fakeMode([
-		assistantRow({ thinking: "a" }),
+		assistantRow({}),
 		finishedBash("c1", "ls"),
 		finishedBash("c2", "pwd"),
-		assistantRow({ text: "我发现了问题" }),
-		finishedBash("c3", "cat a"),
-		finishedBash("c4", "cat b"),
+		assistantRow({}),
+		finishedBash("c3", "id"),
+		finishedBash("c4", "date"),
+		answer,
+		assistantRow({}),
+		finishedBash("c5", "cat a"),
+		finishedBash("c6", "cat b"),
+		assistantRow({}),
+		finishedBash("c7", "grep x"),
+		finishedBash("c8", "grep y"),
 	]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 
 	const summaries = summariesOf(mode);
-	assert.equal(summaries.length, 1);
-	assert.equal(mode.chatContainer.children.length, 1);
-	const lines = plain(summaries[0]!.render(WIDTH));
-	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(summaries.length, 2, "正文之后的调用另起一行摘要");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(
+		plain(summaries[1]!.render(WIDTH))[1]!.trimStart(),
+		"ran 4 shell commands",
+		"正文之后的两段静默轮次仍合入同一行",
+	);
+	assert.deepEqual(mode.chatContainer.children, [summaries[0], answer, summaries[1]], "正文留在两行摘要之间");
 	assert.ok(
-		lines.some((line) => line.includes("我发现了问题")),
-		JSON.stringify(lines),
+		plain(mode.chatContainer.render(WIDTH)).join("\n").includes("我发现了问题"),
+		"正文在收起态可见",
 	);
 });
 
-check("请求内带正文的回复不再单独显示耗时标签", () => {
+check("正文之后的调用另起摘要，正文的耗时只计入下面那一行", () => {
 	const text = assistantRow({ thinking: "想一想", text: "我发现了问题" });
 	applyThoughtLabel(text, 2000);
 	const mode = fakeMode([
@@ -869,10 +865,10 @@ check("请求内带正文的回复不再单独显示耗时标签", () => {
 	groupToolRuns(mode);
 	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
 
-	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
-	assert.equal(lines[1]!.trimStart(), "Thought for 2s, ran 4 shell commands");
-	assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
-	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for"), false);
+	const [before, after] = summariesOf(mode);
+	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for"), false, "耗时只出现在下面那行摘要");
 });
 
 check("用户消息作为边界，两侧各自折叠", () => {
@@ -1093,22 +1089,16 @@ check("收起态点击改动行交给行自己处理", () => {
 	assert.equal(summary.expanded, true);
 });
 
-check("收起态点击正文行不切换摘要，只有摘要行切换", () => {
-	const mode = fakeMode([
-		assistantRow({ text: "第一段正文" }),
-		finishedBash("c1", "ls"),
-		finishedBash("c2", "pwd"),
-		assistantRow({ text: "第二段正文" }),
-	]);
+check("收起态点击空行不切换摘要，只有摘要行切换", () => {
+	const mode = fakeMode([assistantRow({}), finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 	const summary = summariesOf(mode)[0]!;
 
 	const lines = plain(summary.render(WIDTH));
-	const bodyY = lines.findIndex((line) => line.includes("第二段正文"));
-	assert.ok(bodyY > 1, JSON.stringify(lines));
-	summary.handleMouse({ type: "click", button: "left", x: 3, y: bodyY, height: 1 } as any);
-	assert.equal(summary.expanded, false, "点击正文不应展开摘要");
+	assert.equal(lines.length, 2, JSON.stringify(lines));
+	summary.handleMouse({ type: "click", button: "left", x: 3, y: 0, height: 1 } as any);
+	assert.equal(summary.expanded, false, "点击空行不应展开摘要");
 
 	summary.handleMouse({ type: "click", button: "left", x: 3, y: 1, height: 1 } as any);
 	assert.equal(summary.expanded, true, "点击摘要行应展开");
@@ -1162,7 +1152,7 @@ check("展开态重建后新纳入的工具组也展开", () => {
 	assert.equal(collapsed.expanded, false);
 });
 
-check("请求级摘要吸收带正文的后续回复，只留一行耗时", () => {
+check("正文之后的调用另起一行摘要，耗时按段累加", () => {
 	const first = assistantRow({ thinking: "先确认", text: "主人，先确认源目录和技能目录的现状。" });
 	const silent = assistantRow({ thinking: "查一下" });
 	const second = assistantRow({ thinking: "再看", text: "主人，创建符号链接需要管理员权限。" });
@@ -1184,15 +1174,13 @@ check("请求级摘要吸收带正文的后续回复，只留一行耗时", () =
 	]);
 	groupSilentTurns(mode, { thoughtMsFor: (item) => elapsed.get(item) });
 
-	assert.equal(mode.chatContainer.children.length, 2);
-	assert.equal(mode.chatContainer.children[0], first);
-	const lines = plain(summariesOf(mode)[0]!.render(WIDTH));
-	assert.equal(lines[1]!.trimStart(), "Thought for 4s, ran 2 shell commands");
-	assert.equal(lines.filter((line) => line.includes("Thought for")).length, 1, JSON.stringify(lines));
-	assert.ok(
-		lines.some((line) => line.includes("主人，创建符号链接需要管理员权限。")),
-		JSON.stringify(lines),
-	);
+	const summary = summariesOf(mode)[0]!;
+	assert.deepEqual(mode.chatContainer.children, [first, summary, second], "正文把两行摘要分开");
+	// 第一段摘要累加区间前那条回复与区间内静默轮次的耗时。
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 3s, ran 2 shell commands");
+	assert.equal(plain(first.render(WIDTH)).join("\n").includes("Thought for"), false, "耗时已在摘要行");
+	// 收尾回复不再被吸收，保留自己的耗时标签。
+	assert.ok(plain(second.render(WIDTH)).join("\n").includes("Thought for 1s"));
 });
 
 check("收起时隐去思考正文，展开后按 Pi 设置显示", () => {

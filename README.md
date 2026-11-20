@@ -10,7 +10,7 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 
 ## 效果
 
-![一次请求收起后只剩一行摘要](assets/hero-collapsed.png)
+![工具调用收起后只剩一行摘要](assets/hero-collapsed.png)
 
 上面这一屏是三个渲染类扩展叠加的结果：`minimal-tools`、`message-marks`、`tool-run-groups`。
 
@@ -31,7 +31,7 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 |---|---|
 | [minimal-tools](extensions/render/minimal-tools/README.md) | 工具调用的显示：执行中可见，结束后收成一行 |
 | [message-marks](extensions/render/message-marks/README.md) | 用户、助手与工具共用的 2 列标记栏 |
-| [tool-run-groups](extensions/render/tool-run-groups/README.md) | 同一请求的工具调用折叠成一行摘要 |
+| [tool-run-groups](extensions/render/tool-run-groups/README.md) | 工具调用折叠成一行摘要，回复正文之后另起一行摘要 |
 
 ### agent 类
 
