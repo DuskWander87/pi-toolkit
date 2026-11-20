@@ -1,0 +1,22 @@
+{
+	"name": "pi-toolkit-subagent",
+	"version": "0.1.0",
+	"description": "Pi coding agent 的子代理工具：任务在独立上下文里跑完，主会话只收回结论",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DuskWander87/pi-toolkit.git",
+		"directory": "extensions/agent/subagent"
+	},
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts", "agents.ts", "run.ts"],
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	}
+}

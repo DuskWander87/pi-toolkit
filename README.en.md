@@ -40,6 +40,7 @@ This screen layers three rendering extensions: `minimal-tools`, `message-marks`,
 | Extension | What it does |
 |---|---|
 | [skill-tool](extensions/agent/skill-tool/README.md) | Turns skill loading into a dedicated tool, with the catalog in its description |
+| [subagent](extensions/agent/subagent/README.md) | Hands research work to a subagent in its own context; only the conclusion comes back |
 
 How to pick: an extension that only changes display is rendering; one that changes the agent's tools, prompt, or behavior is agent.
 

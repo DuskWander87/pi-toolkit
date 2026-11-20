@@ -40,6 +40,7 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 | 扩展 | 作用 |
 |---|---|
 | [skill-tool](extensions/agent/skill-tool/README.md) | 技能的加载动作换成专用工具，清单随之挪进工具描述 |
+| [subagent](extensions/agent/subagent/README.md) | 把调研任务交给独立上下文的子代理，主会话只收回结论 |
 
 归类判据：只改显示就是渲染类；改 agent 的工具、提示词或行为就是 agent 类。
 

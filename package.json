@@ -13,7 +13,7 @@
 		"url": "git+https://github.com/DuskWander87/pi-toolkit.git"
 	},
 	"scripts": {
-		"test": "jiti test/render/minimal-tools.test.ts && jiti test/render/message-marks.test.ts && jiti test/render/tool-run-groups.test.ts && jiti test/integration.test.ts && jiti test/agent/skill-tool.test.ts",
+		"test": "jiti test/render/minimal-tools.test.ts && jiti test/render/message-marks.test.ts && jiti test/render/tool-run-groups.test.ts && jiti test/integration.test.ts && jiti test/agent/skill-tool.test.ts && jiti test/agent/subagent.test.ts",
 		"typecheck": "npx -y -p typescript@5.9.3 tsc --noEmit"
 	},
 	"devDependencies": {

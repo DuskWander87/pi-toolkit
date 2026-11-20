@@ -3,6 +3,6 @@
 	"private": true,
 	"type": "module",
 	"pi": {
-		"extensions": ["./skill-tool/index.ts"]
+		"extensions": ["./skill-tool/index.ts", "./subagent/index.ts"]
 	}
 }
