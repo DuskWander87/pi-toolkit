@@ -42,7 +42,6 @@ function formatTokens(count: number): string {
 
 function formatUsage(usage: Usage): string {
 	const parts: string[] = [];
-	if (usage.turns) parts.push(`${usage.turns} 轮`);
 	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
 	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
 	if (usage.contextTokens) parts.push(`ctx:${formatTokens(usage.contextTokens)}`);

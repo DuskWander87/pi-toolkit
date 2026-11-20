@@ -38,11 +38,10 @@ export interface Usage {
 	input: number;
 	output: number;
 	contextTokens: number;
-	turns: number;
 }
 
 export function emptyUsage(): Usage {
-	return { input: 0, output: 0, contextTokens: 0, turns: 0 };
+	return { input: 0, output: 0, contextTokens: 0 };
 }
 
 export interface DispatchDefaults {
@@ -165,7 +164,6 @@ export function addUsage(usage: Usage, message: Message): Usage {
 		input: usage.input + input,
 		output: usage.output + output,
 		contextTokens: totalTokens,
-		turns: usage.turns + 1,
 	};
 }
 

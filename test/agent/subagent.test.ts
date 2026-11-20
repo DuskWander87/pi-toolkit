@@ -319,7 +319,7 @@ check("addUsage：累加助手消息，非助手消息原样返回", () => {
 		content: [],
 		usage: { input: 50, output: 10, totalTokens: 180 },
 	} as never);
-	assert.deepEqual(second, { input: 150, output: 30, contextTokens: 180, turns: 2 });
+	assert.deepEqual(second, { input: 150, output: 30, contextTokens: 180 });
 
 	const untouched = addUsage(second, { role: "user", content: "hi" } as never);
 	assert.equal(untouched, second);
@@ -624,7 +624,6 @@ check("runAgent：正常退出时取最后一段文本，用量累加", async ()
 		});
 		assert.equal(result.status, "completed");
 		assert.equal(result.output, "最终结论");
-		assert.equal(result.usage.turns, 3);
 		assert.equal(result.usage.input, 23);
 		assert.equal(result.usage.contextTokens, 20);
 	} finally {
