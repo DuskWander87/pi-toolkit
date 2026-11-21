@@ -1213,7 +1213,7 @@ check("Pi 切换隐藏思考时，展开态跟随实例开关、收起态始终�
 	});
 	chat.addChild(summary);
 
-	// Pi 1.5.2 调 `updateThinkingBlockVisibility()` 时不传参数；开关在实例字段上。
+	// Pi 1.6.0 调 `updateThinkingBlockVisibility()` 时不传参数；开关在实例字段上。
 	const mode = { hideThinkingBlock: true, chatContainer: chat, ui: { requestRender() {} } };
 	const update = (
 		InteractiveMode.prototype as unknown as { updateThinkingBlockVisibility: (this: typeof mode) => void }

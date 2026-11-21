@@ -263,7 +263,7 @@ export function piInvocation(
 }
 
 /** 把 `spawnCommand` 与 pi 参数合成最终启动命令；数组形式把前置参数排在 pi 参数之前。 */
-function spawnCommandInvocation(
+export function spawnCommandInvocation(
 	spawnCommand: string | readonly string[] | undefined,
 	args: string[],
 ): { command: string; args: string[] } {

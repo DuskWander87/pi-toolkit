@@ -64,7 +64,7 @@ const ORIGINAL_SKILL = Symbol.for("pi-toolkit.message-marks.skill");
 let activeTheme: Theme | undefined;
 
 interface PatchedPrototype {
-	render(width: number): string[];
+	render(width: number): readonly string[];
 }
 
 /** `AssistantMessageComponent` 中渲染时用到的内部结构。 */
@@ -219,9 +219,9 @@ const transformCache = new WeakMap<object, TransformCache>();
  */
 function cachedTransform(
 	component: object,
-	lines: string[],
+	lines: readonly string[],
 	key: string,
-	transform: (lines: string[]) => string[],
+	transform: (lines: readonly string[]) => string[],
 ): string[] {
 	const cached = transformCache.get(component);
 	if (cached && cached.key === key && cached.source.length === lines.length) {
@@ -279,7 +279,7 @@ export function prefixFirstContentLine(lines: string[], prefix: string): string[
 export function installUserMessagePrefix(component: typeof UserMessageComponent = UserMessageComponent): void {
 	const prototype = component.prototype as unknown as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[ORIGINAL_USER] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (width: number): string[] {
+	prototype.render = function (width: number): readonly string[] {
 		const lines = render.call(this, width);
 		const prefix = getSelectListTheme().description(PREFIX);
 		return cachedTransform(this, lines, `${width}\0${prefix}`, (source) =>
@@ -317,7 +317,7 @@ function toolMarker(component: ToolInternals): string {
  * 再按 `markdownSlots` 的 kind 认出文本块；思考块与错误提示不算，因此圆点
  * 不会落在 `Thinking...` 上。
  */
-function firstTextRow(component: AssistantInternals, lines: string[]): number {
+function firstTextRow(component: AssistantInternals, lines: readonly string[]): number {
 	const layout = component.contentContainer?.childLines;
 	const slots = component.markdownSlots;
 	if (!layout || !slots) return -1;
@@ -343,7 +343,7 @@ function firstTextRow(component: AssistantInternals, lines: string[]): number {
 export function installAssistantMarks(component: typeof AssistantMessageComponent = AssistantMessageComponent): void {
 	const prototype = component.prototype as unknown as AssistantInternals & Record<PropertyKey, unknown>;
 	const render = (prototype[ORIGINAL_ASSISTANT] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (this: AssistantInternals, width: number): string[] {
+	prototype.render = function (this: AssistantInternals, width: number): readonly string[] {
 		const lines = render.call(this, width);
 		const marker = assistantMarker();
 		const slots = this.markdownSlots?.length ?? -1;
@@ -379,7 +379,7 @@ function installMarkerGutter(component: { prototype: object }, options: MarkerGu
 	const { symbol, marker: resolveMarker, stripBackground, leadingBlanks = 1 } = options;
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (this: PatchedPrototype, width: number): string[] {
+	prototype.render = function (this: PatchedPrototype, width: number): readonly string[] {
 		const lines = render.call(this, width);
 		const marker = resolveMarker(this);
 		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
@@ -413,7 +413,7 @@ export function installToolMarks(component: typeof ToolExecutionComponent = Tool
 export function installGutter(component: { prototype: object }, symbol: symbol, leadingBlanks: 0 | 1 = 1): void {
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
-	prototype.render = function (width: number): string[] {
+	prototype.render = function (width: number): readonly string[] {
 		const lines = render.call(this, width);
 		return cachedTransform(this, lines, `${width}\0${String(symbol.description)}`, (source) =>
 			normalizeBlockSpacing(
@@ -474,17 +474,19 @@ export class PromptPrefixEditor extends CustomEditor {
 		super.setPaddingX(padding + GUTTER);
 	}
 
+	/** `Editor.render` 声明为可变数组，这里跟随父类签名；按 Component 约定（返回数组调用方不得修改）先复制再改。 */
 	render(width: number): string[] {
-		const lines = super.render(width);
-		if (lines.length < 3) return lines;
+		const source = super.render(width);
+		if (source.length < 3) return source;
 		// 窄终端下内边距会被压缩，前缀放不下时保持原样。
 		const padding = Math.min(super.getPaddingX(), Math.max(0, Math.floor((width - 1) / 2)));
-		if (padding < GUTTER) return lines;
+		if (padding < GUTTER) return source;
 		// 索引 0 是上边框，首行内容固定在其后。
-		const first = lines[1]!;
-		if (first.startsWith(" ".repeat(GUTTER))) {
-			lines[1] = getSelectListTheme().description(PREFIX) + first.slice(GUTTER);
-		}
+		const first = source[1]!;
+		if (!first.startsWith(" ".repeat(GUTTER))) return source;
+		// 先复制再改：父类的返回数组可能被它自己缓存，原地写会污染下一次渲染。
+		const lines = [...source];
+		lines[1] = getSelectListTheme().description(PREFIX) + first.slice(GUTTER);
 		return lines;
 	}
 }

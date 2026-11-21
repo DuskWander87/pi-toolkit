@@ -33,6 +33,7 @@ import {
 	parseMessageEvent,
 	piInvocation,
 	runAgent,
+	spawnCommandInvocation,
 	stopFailure,
 } from "../../extensions/agent/subagent/run.ts";
 import { check, finish } from "../harness.ts";
@@ -531,18 +532,33 @@ check("piInvocation：argv[1] 不存在时退回 PATH 上的 pi", () => {
 	);
 });
 
+check("spawnCommandInvocation：空串、空数组与没给一样按 pi 的安装方式推断", () => {
+	const args = ["-p", "任务"];
+	const expected = piInvocation(args);
+	assert.deepEqual(spawnCommandInvocation(undefined, args), expected);
+	assert.deepEqual(spawnCommandInvocation("", args), expected);
+	assert.deepEqual(spawnCommandInvocation([], args), expected);
+});
+
+check("spawnCommandInvocation：数组首项是命令、其余排在 pi 参数之前，字符串是完整命令", () => {
+	assert.deepEqual(spawnCommandInvocation(["bash", "/tmp/fake-pi"], ["-p", "任务"]), {
+		command: "bash",
+		args: ["/tmp/fake-pi", "-p", "任务"],
+	});
+	assert.deepEqual(spawnCommandInvocation("/usr/local/bin/fake-pi", ["-p"]), {
+		command: "/usr/local/bin/fake-pi",
+		args: ["-p"],
+	});
+});
+
 // ============================================================================
 // 进程路径
 // ============================================================================
 
 interface FakePi {
+	/** `["bash", 脚本路径]`：Windows 上的 `spawn` 不能直接执行无扩展名的脚本。 */
 	command: string[];
 	cleanup: () => void;
-}
-
-/** 用 bash 显式执行假 `pi`：Windows 上的 `spawn` 不能直接执行无扩展名的脚本。 */
-function piCommand(file: string): string[] {
-	return ["bash", file];
 }
 
 /** 写一个假 `pi`：它按脚本回放 JSONL，不跑模型。 */
@@ -550,7 +566,7 @@ function fakePi(body: string[]): FakePi {
 	const dir = tempDir();
 	const file = path.join(dir.path, "pi");
 	fs.writeFileSync(file, ["#!/bin/sh", ...body, ""].join("\n"), { mode: 0o755 });
-	return { command: piCommand(file), cleanup: dir.cleanup };
+	return { command: ["bash", file], cleanup: dir.cleanup };
 }
 
 /**
@@ -576,7 +592,7 @@ function recordingFakePi(body: string[]): FakePi & { argv: () => string[]; promp
 	].join("\n");
 	fs.writeFileSync(file, script, { mode: 0o755 });
 	return {
-		command: piCommand(file),
+		command: ["bash", file],
 		cleanup: dir.cleanup,
 		argv: () => fs.readFileSync(argvLog, "utf-8").split("\n"),
 		prompt: () => (fs.existsSync(promptCopy) ? fs.readFileSync(promptCopy, "utf-8") : undefined),

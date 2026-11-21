@@ -85,7 +85,7 @@ interface GroupableMode {
 	ui?: { requestRender?: () => void };
 	handleEvent?: (event: unknown) => Promise<void>;
 	renderSessionItems?: (...args: unknown[]) => unknown;
-	/** Pi 1.5.2 的该方法不接收参数，开关状态在 `hideThinkingBlock` 上。 */
+	/** Pi 1.6.0 的该方法不接收参数，开关状态在 `hideThinkingBlock` 上。 */
 	updateThinkingBlockVisibility?: () => void;
 	hideThinkingBlock?: boolean;
 }
@@ -252,7 +252,7 @@ export class ToolRunGroup extends Container {
 	 * 收起时是一行空行 + 摘要行，位置与被替换掉的首个工具行一致（工具行自带前导空行）。
 	 * 展开时摘要行之后直接铺开子组件，子组件各自的前导空行提供间隔。
 	 */
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const summary = this.summaryLine(width);
 		return this.expandedState ? ["", summary, ...super.render(width)] : ["", summary];
 	}
@@ -413,7 +413,7 @@ export class ToolRunSummary extends Container {
 		setThinkingHidden(this.extraThought, hidden);
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const summary = this.summaryLine(width);
 		if (this.expandedState) {
 			this.soloLayout = [];

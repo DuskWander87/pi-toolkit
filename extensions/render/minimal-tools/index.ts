@@ -424,7 +424,7 @@ class DiffLines implements Component {
 		private readonly maxWrapRows?: number,
 	) {}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		if (this.cache?.width === width) return this.cache.lines;
 		const lines: string[] = [];
 		for (const line of this.lines) lines.push(...this.renderLine(line, width));
