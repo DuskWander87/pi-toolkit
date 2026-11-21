@@ -90,7 +90,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 ## Compatibility
 
-- Verified against Pi 1.5.2; other versions are not promised
+- Verified against Pi 1.6.0; other versions are not promised
 - Every extension depends on Pi internals in its own place, so a Pi upgrade may degrade or break them. Each README lists its own dependency points under its 边界 (boundaries) or 限制 (limits) section
 
 ## Tests
@@ -105,7 +105,7 @@ npm run typecheck
 Tests need `jiti`, `chalk`, and the two host packages; `typebox` is a devDependency in `package.json` and lands at the top of `node_modules` along with the host packages. The type check also needs `@types/node` (it ships as a development dependency of the host packages, so it is not pulled in by the command above). On a fresh clone without `node_modules`, install them without touching `package.json`:
 
 ```bash
-npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk @types/node
+npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.6.0 @earendil-works/pi-tui@1.6.0 jiti chalk @types/node
 ```
 
 Skip this step when `node_modules` already points at your Pi installation.

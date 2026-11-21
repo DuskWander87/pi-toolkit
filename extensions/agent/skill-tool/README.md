@@ -73,7 +73,7 @@ pi remove ./pi-toolkit/extensions/agent/skill-tool    # 卸载
 
 ### 依赖
 
-- Pi 的内部结构：靠 `before_agent_start` 的 `systemPromptOptions` 是可写对象、`stripFrontmatter` 从包根导出。已在 Pi 1.5.2 验证，升级后可能失效
+- Pi 的内部结构：靠 `before_agent_start` 的 `systemPromptOptions` 是可写对象、`stripFrontmatter` 从包根导出。已在 Pi 1.6.0 验证，升级后可能失效
 
 ### 已知问题
 

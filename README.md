@@ -90,7 +90,7 @@ pi remove git:github.com/DuskWander87/pi-toolkit
 
 ## 兼容性
 
-- 已在 Pi 1.5.2 验证，不承诺其他版本
+- 已在 Pi 1.6.0 验证，不承诺其他版本
 - 每个扩展都在不同位置依赖 Pi 的内部结构，Pi 升级后可能退化或失效。具体依赖点写在各自 README 的「边界」或「限制」章节
 
 ## 测试
@@ -105,7 +105,7 @@ npm run typecheck
 测试依赖 `jiti`、`chalk` 与两个 host 包；`typebox` 是 `package.json` 里的 devDependency，装 host 包时会一并落到 `node_modules` 顶层。类型检查另需 `@types/node`（它在 host 包的开发依赖里，不会随上面这些包一起装上）。新 clone 且没有 `node_modules` 时，先装一份不写入 `package.json` 的依赖：
 
 ```bash
-npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-tui@1.5.2 jiti chalk @types/node
+npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.6.0 @earendil-works/pi-tui@1.6.0 jiti chalk @types/node
 ```
 
 本机已经把 `node_modules` 指向 Pi 安装目录时，跳过这一步。
