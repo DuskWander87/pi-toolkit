@@ -536,8 +536,13 @@ check("piInvocation：argv[1] 不存在时退回 PATH 上的 pi", () => {
 // ============================================================================
 
 interface FakePi {
-	file: string;
+	command: string[];
 	cleanup: () => void;
+}
+
+/** 用 bash 显式执行假 `pi`：Windows 上的 `spawn` 不能直接执行无扩展名的脚本。 */
+function piCommand(file: string): string[] {
+	return ["bash", file];
 }
 
 /** 写一个假 `pi`：它按脚本回放 JSONL，不跑模型。 */
@@ -545,7 +550,7 @@ function fakePi(body: string[]): FakePi {
 	const dir = tempDir();
 	const file = path.join(dir.path, "pi");
 	fs.writeFileSync(file, ["#!/bin/sh", ...body, ""].join("\n"), { mode: 0o755 });
-	return { file, cleanup: dir.cleanup };
+	return { command: piCommand(file), cleanup: dir.cleanup };
 }
 
 /**
@@ -571,7 +576,7 @@ function recordingFakePi(body: string[]): FakePi & { argv: () => string[]; promp
 	].join("\n");
 	fs.writeFileSync(file, script, { mode: 0o755 });
 	return {
-		file,
+		command: piCommand(file),
 		cleanup: dir.cleanup,
 		argv: () => fs.readFileSync(argvLog, "utf-8").split("\n"),
 		prompt: () => (fs.existsSync(promptCopy) ? fs.readFileSync(promptCopy, "utf-8") : undefined),
@@ -620,7 +625,7 @@ check("runAgent：正常退出时取最后一段文本，用量累加", async ()
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "completed");
 		assert.equal(result.output, "最终结论");
@@ -653,7 +658,7 @@ check("runAgent：退出码 0 但末条消息 stopReason=error 算失败", async
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "failed");
 		assert.equal(result.error, "模型侧报错：provider 429: rate limited");
@@ -672,7 +677,7 @@ check("runAgent：非 0 退出时把退出码与 stderr 带进错误", async () 
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "failed");
 		assert.ok(result.error?.includes("3"), result.error);
@@ -702,7 +707,7 @@ check("runAgent：正常退出但没有文本算失败", async () => {
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "failed");
 		assert.equal(result.error, "子进程正常退出但没有返回文本");
@@ -721,7 +726,7 @@ check("runAgent：形状不合约的事件被丢弃，任务以没有文本收�
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "failed");
 		assert.equal(result.error, "子进程正常退出但没有返回文本");
@@ -751,7 +756,7 @@ check("runAgent：收尾停在工具调用轮算失败，过场话不当结论",
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "failed");
 		assert.equal(result.error, "子代理停在工具调用轮，没有给出结论");
@@ -770,7 +775,7 @@ check("runAgent：系统提示确实通过 --append-system-prompt 传参", async
 			task: "调研",
 			defaults: {},
 			cwd: process.cwd(),
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		assert.equal(result.status, "completed");
 
@@ -806,7 +811,7 @@ check("runAgent：中止后标 aborted，系统提示临时目录不残留", asy
 			defaults: {},
 			cwd: process.cwd(),
 			signal: controller.signal,
-			spawnCommand: fake.file,
+			spawnCommand: fake.command,
 		});
 		setTimeout(() => controller.abort(), 100);
 

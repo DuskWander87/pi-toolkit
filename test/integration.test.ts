@@ -75,7 +75,7 @@ function assistantRow(thinking: string, text?: string): AssistantMessageComponen
 	);
 }
 
-function plain(lines: string[]): string[] {
+function plain(lines: readonly string[]): string[] {
 	return lines.map(stripTerminalSequences);
 }
 
@@ -84,7 +84,7 @@ function bgOf(line: string): string | undefined {
 	return line.match(/^\x1b\[48;[0-9;]*m/)?.[0];
 }
 
-function bodyLines(lines: string[]): string[] {
+function bodyLines(lines: readonly string[]): string[] {
 	return lines.filter((line) => stripTerminalSequences(line).trim() !== "");
 }
 

@@ -66,7 +66,7 @@ function finishedBash(id: string, command: string): ToolExecutionComponent {
 	return finish(bashRow(id, command));
 }
 
-function plain(lines: string[]): string[] {
+function plain(lines: readonly string[]): string[] {
 	return lines.map((line) => stripTerminalSequences(line));
 }
 

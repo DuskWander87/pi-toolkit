@@ -110,7 +110,7 @@ npm install --no-save --no-package-lock @earendil-works/pi-coding-agent@1.5.2 @e
 
 Skip this step when `node_modules` already points at your Pi installation.
 
-Tests live under `test/`, mirroring the `extensions/` directories (`test/render/*.test.ts`, `test/agent/*.test.ts`): one file per extension, with the covered cases spelled out in the case names; `test/integration.test.ts` covers several extensions installed together.
+Tests live under `test/`, mirroring the `extensions/` directories (`test/render/*.test.ts`, `test/agent/*.test.ts`): one file per extension, with the covered cases spelled out in the case names; `test/integration.test.ts` covers several extensions installed together. The process cases in `test/agent/subagent.test.ts` launch a fake `pi` as a child process, so `bash` must be on `PATH` (Git Bash or WSL on Windows).
 
 ## License
 

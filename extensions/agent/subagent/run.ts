@@ -262,6 +262,18 @@ export function piInvocation(
 	return { command: execPath, args };
 }
 
+/** 把 `spawnCommand` 与 pi 参数合成最终启动命令；数组形式把前置参数排在 pi 参数之前。 */
+function spawnCommandInvocation(
+	spawnCommand: string | readonly string[] | undefined,
+	args: string[],
+): { command: string; args: string[] } {
+	if (typeof spawnCommand === "string") {
+		return spawnCommand === "" ? piInvocation(args) : { command: spawnCommand, args };
+	}
+	const [command, ...prefix] = spawnCommand ?? [];
+	return command === undefined ? piInvocation(args) : { command, args: [...prefix, ...args] };
+}
+
 /** 子进程被 SIGTERM 后留给它收尾的时间，超时再 SIGKILL。 */
 const KILL_GRACE_MS = 5000;
 
@@ -278,8 +290,11 @@ export interface RunOptions {
 	cwd: string;
 	signal?: AbortSignal;
 	onProgress?: (progress: Progress) => void;
-	/** 替换启动命令，默认按 pi 的安装方式推断。测试用它注入回放固定 JSONL 的假 `pi`。 */
-	spawnCommand?: string;
+	/**
+	 * 替换启动命令，默认按 pi 的安装方式推断。测试用它注入回放固定 JSONL 的假 `pi`：
+	 * 传入数组时第一项是命令，其余项排在 pi 参数之前。空串与空数组等同于没给。
+	 */
+	spawnCommand?: string | readonly string[];
 }
 
 export async function runAgent({
@@ -320,7 +335,7 @@ export async function runAgent({
 		let aborted = false;
 
 		const outcome = await new Promise<ProcessOutcome>((resolve) => {
-			const invocation = spawnCommand ? { command: spawnCommand, args } : piInvocation(args);
+			const invocation = spawnCommandInvocation(spawnCommand, args);
 			let settled = false;
 			let killTimer: ReturnType<typeof setTimeout> | undefined;
 			let exited = false;

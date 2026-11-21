@@ -192,11 +192,11 @@ function assistantComponent(content: unknown[], hideThinking = true): AssistantM
 	);
 }
 
-function assistantLines(content: unknown[], hideThinking = true, width = WIDTH): string[] {
+function assistantLines(content: unknown[], hideThinking = true, width = WIDTH): readonly string[] {
 	return assistantComponent(content, hideThinking).render(width);
 }
 
-function plain(lines: string[]): string[] {
+function plain(lines: readonly string[]): string[] {
 	return lines.map(stripTerminalSequences);
 }
 
@@ -217,7 +217,7 @@ const DEMO_TOOL = {
 	renderResult: () => new Text("done", 1, 0),
 };
 
-function toolLines(result?: unknown, isPartial = false, width = WIDTH): string[] {
+function toolLines(result?: unknown, isPartial = false, width = WIDTH): readonly string[] {
 	const component = new ToolExecutionComponent(
 		"demo",
 		"call-1",
@@ -371,7 +371,7 @@ check("主题变化后工具圆点更新（缓存按 marker 失效）", () => {
 const fakeUI = { requestRender() {} } as any;
 const systemMarkdown = getMarkdownTheme();
 
-function assertGutterAligned(lines: string[], width = WIDTH): void {
+function assertGutterAligned(lines: readonly string[], width = WIDTH): void {
 	for (const line of lines) {
 		assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${JSON.stringify(stripTerminalSequences(line))}`);
 		if (isBlank(line)) continue;
@@ -424,7 +424,7 @@ check("skill 调用与工具行同一套标记栏：去背景、首行蓝圆点"
 	const marker = testTheme.style("●", { fg: SUCCESS_MARKER_COLOR });
 	const skill = skillComponent();
 
-	const assertSkillLines = (lines: string[]): void => {
+	const assertSkillLines = (lines: readonly string[]): void => {
 		const joined = lines.join("\n");
 		assert.equal(joined.includes("\x1b[48;"), false, "不应保留背景色");
 		assert.equal(joined.includes("\x1b[49m"), false, "不应保留背景复位");
@@ -491,13 +491,13 @@ check("重复安装系统组件不叠加缩进", () => {
 	assert.equal(skillLines.join("").includes("\x1b[48;"), false, "重复安装不恢复背景色");
 });
 
-function leadingBlanks(lines: string[]): number {
+function leadingBlanks(lines: readonly string[]): number {
 	let count = 0;
 	while (count < lines.length && isBlank(lines[count]!)) count++;
 	return count;
 }
 
-function trailingBlanks(lines: string[]): number {
+function trailingBlanks(lines: readonly string[]): number {
 	let count = 0;
 	while (count < lines.length && isBlank(lines[lines.length - 1 - count]!)) count++;
 	return count;
