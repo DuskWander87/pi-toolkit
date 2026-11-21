@@ -70,7 +70,7 @@ interface PatchedPrototype {
 /** `AssistantMessageComponent` 中渲染时用到的内部结构。 */
 interface AssistantInternals extends PatchedPrototype {
 	contentContainer?: {
-		mouseLayout?: { width: number; children: Array<{ component: unknown; height: number }> };
+		childLines?: { width: number; children: unknown[]; parts: string[][] };
 	};
 	markdownSlots?: Array<{ kind: string; markdown: unknown }>;
 }
@@ -313,29 +313,28 @@ function toolMarker(component: ToolInternals): string {
 /**
  * 首个文本块第一行的行号。
  *
- * `Container.render` 会把子组件高度写进 `contentContainer.mouseLayout`，
+ * `Container.render` 会把每个子组件的行写进 `contentContainer.childLines`，
  * 再按 `markdownSlots` 的 kind 认出文本块；思考块与错误提示不算，因此圆点
  * 不会落在 `Thinking...` 上。
  */
 function firstTextRow(component: AssistantInternals, lines: string[]): number {
-	const layout = component.contentContainer?.mouseLayout;
+	const layout = component.contentContainer?.childLines;
 	const slots = component.markdownSlots;
 	if (!layout || !slots) return -1;
 	let row = 0;
-	for (const child of layout.children) {
-		const inner =
-			child.component instanceof MouseRegion
-				? (child.component as unknown as { child: unknown }).child
-				: child.component;
+	for (let index = 0; index < layout.children.length; index++) {
+		const child = layout.children[index];
+		const inner = child instanceof MouseRegion ? (child as unknown as { child: unknown }).child : child;
+		const height = layout.parts[index]?.length ?? 0;
 		const slot = slots.find((entry) => entry.markdown === inner);
 		if (slot?.kind === "text") {
-			const end = Math.min(row + child.height, lines.length);
+			const end = Math.min(row + height, lines.length);
 			for (let i = row; i < end; i++) {
 				if (!isBlankLine(lines[i]!)) return i;
 			}
 			return -1;
 		}
-		row += child.height;
+		row += height;
 	}
 	return -1;
 }
@@ -348,7 +347,7 @@ export function installAssistantMarks(component: typeof AssistantMessageComponen
 		const lines = render.call(this, width);
 		const marker = assistantMarker();
 		const slots = this.markdownSlots?.length ?? -1;
-		const rows = this.contentContainer?.mouseLayout?.children.length ?? -1;
+		const rows = this.contentContainer?.childLines?.children.length ?? -1;
 		const key = `${width}\0${marker}\0${slots}\0${rows}`;
 		return cachedTransform(this, lines, key, (source) => {
 			const guttered = source.map((line) => gutterLine(line));

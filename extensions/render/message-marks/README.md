@@ -92,7 +92,7 @@ pi remove ./pi-toolkit/extensions/render/message-marks    # 卸载
 
 ### 依赖
 
-- 组件内部结构：助手圆点的位置读取 `contentContainer.mouseLayout` 与 `markdownSlots`；Pi 更新若改变这些字段，圆点会退化或错位
+- 组件内部结构：助手圆点的位置读取 `contentContainer.childLines` 与 `markdownSlots`；Pi 更新若改变这些字段，圆点会退化或错位
 - 输入框通过 `ctx.ui.setEditorComponent` 接管；如果另一个扩展之后也调用 `setEditorComponent`，后注册的编辑器会覆盖本扩展，两者共存时需要包一层工厂
 
 ### 已知问题
