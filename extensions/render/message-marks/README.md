@@ -38,7 +38,9 @@
 - 标记栏固定 2 列：第 1 列放标记，第 2 列为空格
 - 助手消息与工具块的每一行都补到第 2 列；首行用标记替换原有的两格留白
 - 用户消息只在首个内容行插入前缀，后续行补等量空格，使内容从同一列开始
-- 系统类组件每行补到第 2 列；原本就满宽的边框或自定义输出会截回原宽度
+- 系统类组件每行补到第 2 列，不加标记
+- 接管块整体按扣除标记栏后的宽度排版一次：正文不会因为插入标记栏被截掉
+- 渲染器忽略宽度参数、依旧返回超宽行时截回渲染宽度，否则 Pi 会因超宽行抛错
 - 块与块之间统一留 1 行空行：每个块去掉尾随空行，跟在 Pi `Spacer(1)` 后面的块（用户消息、技能调用、压缩/分支摘要）不再保留自身首行空行；块首或块尾挨着终端图片时，那一侧保持原样（图片行与它的占位空行是图片自身的高度）
 - 代码块、列表等已有缩进保持相对结构；终端图片行（Kitty / iTerm2 协议）不参与缩进与标记
 
@@ -100,8 +102,8 @@ pi remove ./pi-toolkit/extensions/render/message-marks    # 卸载
 - **成功蓝是固定 RGB**：主题没有蓝色令牌，无法随自定义主题变化
 - **只标第一个文本块**：一条助手消息中的后续文本块不加圆点
 - **图片行不缩进**：终端图片自带单元格定位，保持原样
-- **满宽内容可能被截断**：系统类组件的满宽边框或 `customRenderer` 输出右侧会丢最多 2 列
-- **`outputPad=0` 时满宽工具行会丢字**：`minimal-tools` 的自壳工具行在 `outputPad=0` 下没有行尾留白可回收，为腾出 2 列标记栏会在行尾截掉最多 2 个字符；`outputPad=1`（默认值）时行尾留下 1 列可回收，不截断
+- **忽略宽度参数的渲染器会被截断**：系统类组件或 `customRenderer` 直接返回固定宽度的行时，右侧按渲染宽度截回
+- **接管块正文窄 2 列**：标记栏占的是渲染宽度里的 2 列，Markdown 正文（自定义消息、压缩/分支摘要、技能内容）因此比助手消息早 2 列换行；`outputPad=0` 的工具行同理。助手消息与用户消息不经过这一级，宽度不受影响
 - **Pi 直接插入的提示行紧贴上一块**：扩展报错这类不是消息组件的行由 Pi 直接追加，本扩展不参与，与上一块之间没有空行
 - **代码块相对缩进少 1 列**：正文移到第 2 列后，块内相对缩进比原来少 1 列
 
@@ -117,7 +119,9 @@ pi remove ./pi-toolkit/extensions/render/message-marks    # 卸载
 - `AssistantMessageComponent.render`：整条消息对齐 + 首个文本块圆点
 - `ToolExecutionComponent.render`：整块对齐 + 状态圆点
 - `SkillInvocationMessageComponent.render`：去背景色 + 整块对齐 + 圆点
-- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`：统一补缩进，满宽行截回原宽度；压缩/分支摘要位于 `Spacer(1)` 之后，不再保留首行空行
+- `BashExecutionComponent`、`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`、`CustomMessageComponent`：统一补缩进；压缩/分支摘要位于 `Spacer(1)` 之后，不再保留首行空行
+- 补缩进需要 2 列：整块直接按 `width - 2` 渲染一次，缩进只在左侧补位把 2 列补回、行尾补齐到渲染宽度；不探测、不重渲染，每次刷新只有一遍排版，上游按宽度缓存排版结果
+- 宽度小到放不下标记栏（`width - 2 < 1`）时保持原宽度，交给调用方截断
 - 每个块渲染后由 `normalizeBlockSpacing` 收敛首尾空行，被删掉空行上的 OSC 133 分区标记挂回相邻行
 - 输入框由 `CustomEditor` 子类 `PromptPrefixEditor` 实现：`getPaddingX()` 返回原值，`setPaddingX()` 自动加上 2，对外仍是调用方设置的宽度
 
@@ -125,7 +129,7 @@ pi remove ./pi-toolkit/extensions/render/message-marks    # 卸载
 
 ## 测试
 
-`test/render/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、系统类组件缩进、块间距与重复安装。输入框单独覆盖前缀、宽度、对齐与工作状态。运行方式见[根 README](../../../README.md#测试)。
+`test/render/message-marks.test.ts` 覆盖用户消息前缀、助手与工具圆点、颜色、行宽、满宽正文不丢字、单遍渲染、系统类组件缩进、块间距与重复安装。输入框单独覆盖前缀、宽度、对齐与工作状态。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

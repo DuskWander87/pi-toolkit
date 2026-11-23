@@ -115,6 +115,14 @@ function trimTrailingSpaces(line: string, count: number): string {
 	return body + suffix;
 }
 
+/** 在行尾控制码之前补齐空格，保留行尾控制码。 */
+function padTrailingSpaces(line: string, count: number): string {
+	const match = TRAILING_SEQUENCE.exec(line);
+	const suffix = match?.[0] ?? "";
+	const body = match ? line.slice(0, match.index) : line;
+	return body + " ".repeat(count) + suffix;
+}
+
 /** 在行首控制码之后插入空格，并从行尾回收等量空格，保持整行宽度不变。 */
 function indentLine(line: string, count: number): string {
 	const start = leadingSequenceLength(line);
@@ -237,6 +245,48 @@ function cachedTransform(
 	const result = transform(lines);
 	transformCache.set(component, { key, source: lines.slice(), result });
 	return result;
+}
+
+/**
+ * 按标记栏宽度对齐一行。
+ *
+ * `narrowed` 为真表示内容已按 `width - GUTTER` 渲染：行首补到第 2 列，行尾补齐到
+ * 渲染宽度，行宽与按全宽渲染时一致（背景色因此铺满整行）。
+ */
+function alignLine(line: string, narrowed: boolean, width: number): string {
+	if (!narrowed) return gutterLine(line);
+	// 空行（`Spacer` 的 `""`）与终端图片自带定位，不参与对齐。
+	if (line === "" || IMAGE_LINE.test(line)) return line;
+	const missing = GUTTER - leadingSpaces(line);
+	const start = leadingSequenceLength(line);
+	const shifted = missing > 0 ? line.slice(0, start) + " ".repeat(missing) + line.slice(start) : line;
+	const shortage = width - visibleWidth(shifted);
+	return shortage > 0 ? padTrailingSpaces(shifted, shortage) : shifted;
+}
+
+/**
+ * 按标记栏宽度渲染一次内容：整块交给上游时就把标记栏的 2 列扣掉。
+ *
+ * 上游在自己的宽度里换行，缩进只在左侧补位把 2 列补回、行尾补齐到渲染宽度，
+ * 因此不需要从行尾回收空格、也不会截掉正文。每次刷新只排版一遍，宽度恒定，
+ * 上游按宽度做的排版缓存得以命中。
+ *
+ * 宽度不足以放下标记栏时（极窄终端）保持原宽度：上游组件拿到 0 或负宽度会在
+ * `" ".repeat(width)` 上抛 `RangeError`，这里交给调用方截断。
+ */
+function renderForGutter(
+	width: number,
+	render: (width: number) => readonly string[],
+	target: object,
+): { lines: readonly string[]; renderedWidth: number; narrowed: boolean } {
+	const narrowed = width - GUTTER >= 1;
+	const renderedWidth = narrowed ? width - GUTTER : width;
+	return { lines: render.call(target, renderedWidth), renderedWidth, narrowed };
+}
+
+/** 缓存键：宽度、是否按扣除标记栏后的宽度渲染、标记三者共同决定转换结果。 */
+function transformKey(renderedWidth: number, narrowed: boolean, marker: string): string {
+	return `${renderedWidth}\0${narrowed ? "n" : "w"}\0${marker}`;
 }
 
 /** 用标记替换行首的两格留白，行宽不变。 */
@@ -372,19 +422,19 @@ interface MarkerGutterOptions {
 /**
  * 接管组件的渲染：整块对齐到标记栏，首个内容行加圆点。
  *
- * 补缩进后仍超宽的行（满宽边框、自带留白的 Box）截回渲染宽度，
- * 否则 Pi 会因超宽行抛错。
+ * 整块按扣除标记栏后的宽度渲染一遍，正文不会因为插入标记栏被截掉；
+ * 忽略宽度参数的上游渲染器仍有截回渲染宽度的一道保护，以免 Pi 抛超宽错。
  */
 function installMarkerGutter(component: { prototype: object }, options: MarkerGutterOptions): void {
 	const { symbol, marker: resolveMarker, stripBackground, leadingBlanks = 1 } = options;
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (this: PatchedPrototype, width: number): readonly string[] {
-		const lines = render.call(this, width);
 		const marker = resolveMarker(this);
-		return cachedTransform(this, lines, `${width}\0${marker}`, (source) => {
+		const { lines, renderedWidth, narrowed } = renderForGutter(width, render, this);
+		return cachedTransform(this, lines, transformKey(renderedWidth, narrowed, marker), (source) => {
 			const guttered = source.map((line) => {
-				const aligned = gutterLine(stripBackground ? line.replace(BACKGROUND_SEQUENCE, "") : line);
+				const aligned = alignLine(stripBackground ? line.replace(BACKGROUND_SEQUENCE, "") : line, narrowed, width);
 				return visibleWidth(aligned) > width ? truncateToWidth(aligned, width, "") : aligned;
 			});
 			const row = guttered.findIndex((line) => !isBlankLine(line) && !IMAGE_LINE.test(line));
@@ -405,8 +455,8 @@ export function installToolMarks(component: typeof ToolExecutionComponent = Tool
 /**
  * 系统类组件只对齐左缘：整块补到第 2 列，不加圆点、不剥离背景色。
  *
- * 满宽行（如 bash 的上下边框）插入空格后会超出渲染宽度；从行尾回收不到空格时
- * 直接截回原宽度，否则 Pi 会因超宽行抛错。
+ * 整块按扣除标记栏后的宽度渲染一遍（满宽边框因此完整）；
+ * 忽略宽度参数的上游渲染器仍截回渲染宽度，避免超宽。
  *
  * `leadingBlanks` 给 0 表示该组件紧跟在 Pi 的 `Spacer(1)` 后面（压缩/分支摘要）。
  */
@@ -414,15 +464,19 @@ export function installGutter(component: { prototype: object }, symbol: symbol, 
 	const prototype = component.prototype as PatchedPrototype & Record<PropertyKey, unknown>;
 	const render = (prototype[symbol] ??= prototype.render) as PatchedPrototype["render"];
 	prototype.render = function (width: number): readonly string[] {
-		const lines = render.call(this, width);
-		return cachedTransform(this, lines, `${width}\0${String(symbol.description)}`, (source) =>
-			normalizeBlockSpacing(
-				source.map((line) => {
-					const guttered = gutterLine(line);
-					return visibleWidth(guttered) > width ? truncateToWidth(guttered, width, "") : guttered;
-				}),
-				leadingBlanks,
-			),
+		const { lines, renderedWidth, narrowed } = renderForGutter(width, render, this);
+		return cachedTransform(
+			this,
+			lines,
+			transformKey(renderedWidth, narrowed, String(symbol.description)),
+			(source) =>
+				normalizeBlockSpacing(
+					source.map((line) => {
+						const guttered = alignLine(line, narrowed, width);
+						return visibleWidth(guttered) > width ? truncateToWidth(guttered, width, "") : guttered;
+					}),
+					leadingBlanks,
+				),
 		);
 	};
 }

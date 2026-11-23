@@ -33,6 +33,7 @@ import extend, {
 	PromptPrefixEditor,
 	SUCCESS_MARKER_COLOR,
 	installAssistantMarks,
+	installGutter,
 	installMessageMarks,
 	installToolMarks,
 	installUserMessagePrefix,
@@ -325,6 +326,90 @@ check("工具块所有行内容列对齐到第 2 列，行宽不变", () => {
 	}
 });
 
+/** 恰好在渲染宽度处断行、行尾没有留白的正文：标记栏借不到可回收的空格。 */
+const FULL_WIDTH_BODY = "A".repeat(WIDTH - 4) + "END!";
+
+const FULL_WIDTH_TOOL = {
+	name: "full",
+	renderShell: "self" as const,
+	renderCall: (_args: unknown, theme: any) => new Text(theme.bold("full"), 0, 0),
+	renderResult: (_result: unknown, _options: unknown, _theme: unknown, context: any) =>
+		new Text(FULL_WIDTH_BODY, context.outputPad, 0),
+};
+
+function fullWidthToolLines(outputPad: number, width = WIDTH): readonly string[] {
+	const component = new ToolExecutionComponent(
+		"full",
+		`call-full-${outputPad}`,
+		{},
+		{ outputPad },
+		FULL_WIDTH_TOOL as any,
+		{ requestRender() {} } as any,
+		process.cwd(),
+	);
+	component.markExecutionStarted();
+	component.setArgsComplete();
+	component.updateResult({ content: [], isError: false } as any, false);
+	return component.render(width);
+}
+
+check("行尾没有留白的满宽工具行不丢字", () => {
+	for (const outputPad of [0, 1]) {
+		const lines = fullWidthToolLines(outputPad);
+		// 断行位置可以变，正文本身不能少一个字符。
+		const joined = plain(lines).join("").replace(/\s+/g, "");
+		assert.ok(joined.includes(FULL_WIDTH_BODY), `outputPad=${outputPad}：${plain(lines).join(" / ")}`);
+		for (const line of lines) {
+			assert.ok(visibleWidth(line) <= WIDTH, `outputPad=${outputPad} 超宽：${visibleWidth(line)}`);
+			if (isBlank(line)) continue;
+			assert.equal(bodyColumn(plain([line])[0]!), 2, `outputPad=${outputPad}：${plain([line])[0]}`);
+		}
+	}
+});
+
+check("宽度不足以放下标记栏时退回原宽度，不把负宽度传给上游", () => {
+	const widths: number[] = [];
+	/** 上游桩：记录收到的宽度，并保证每一行都是可见字符（空输出就无法看出宽度）。 */
+	class NarrowProbe {
+		render(width: number): readonly string[] {
+			widths.push(width);
+			return ["N".repeat(width)];
+		}
+	}
+	installGutter(NarrowProbe, Symbol.for("pi-toolkit.test.narrow-probe"));
+
+	for (const width of [1, 2]) {
+		const lines = new NarrowProbe().render(width);
+		assert.ok(lines.length > 0, `width=${width}：输出不能为空`);
+		for (const line of lines) {
+			assert.ok(visibleWidth(line) <= width, `width=${width} 超宽：${visibleWidth(line)}`);
+			// 宽度放不下标记栏时只能截回，这里只要求不超宽、不把负宽度传给上游。
+		}
+		for (const line of fullWidthToolLines(0, width)) {
+			assert.ok(visibleWidth(line) <= width, `width=${width} 工具行超宽：${JSON.stringify(stripTerminalSequences(line))}`);
+		}
+	}
+	// 上游拿到的必须是原宽度，不能是 0 或负数（在 `" ".repeat(width)` 上抛 RangeError）。
+	assert.deepEqual(widths, [1, 2], `上游收到的宽度：${JSON.stringify(widths)}`);
+});
+
+check("每次刷新只排版一遍，宽度固定为扣除标记栏后的值", () => {
+	const widths: number[] = [];
+	class PassProbe {
+		render(width: number): readonly string[] {
+			widths.push(width);
+			return ["P".repeat(width)];
+		}
+	}
+	installGutter(PassProbe, Symbol.for("pi-toolkit.test.pass-probe"));
+
+	const component = new PassProbe();
+	component.render(WIDTH);
+	component.render(WIDTH);
+	// 双渲染会记成 [WIDTH, WIDTH - 2, ...]，宽度来回摆还会让上游排版缓存全部失效。
+	assert.deepEqual(widths, [WIDTH - 2, WIDTH - 2], `上游收到的宽度：${JSON.stringify(widths)}`);
+});
+
 check("重复安装不叠加工具圆点", () => {
 	const lines = plain(toolLines({ content: [], isError: false }));
 	assert.equal((lines.join("").match(/●/g) ?? []).length, 1, lines.join("\n"));
@@ -463,7 +548,7 @@ check("bash 在 outputPad=0 与 2 下都对齐到第 2 列", () => {
 	}
 });
 
-check("customRenderer 满宽输出被截回原宽度", () => {
+check("customRenderer 满宽输出不超宽", () => {
 	const custom = new CustomMessageComponent(
 		{ role: "custom", customType: "demo", content: "x", display: true, timestamp: 0 } as any,
 		() => new Text("X".repeat(WIDTH), 0, 0),
@@ -475,6 +560,25 @@ check("customRenderer 满宽输出被截回原宽度", () => {
 	assert.ok(row !== undefined, JSON.stringify(plain(lines)));
 	assert.equal(row!.startsWith("  "), true, JSON.stringify(row));
 	assert.equal(visibleWidth(lines[plain(lines).indexOf(row!)]!), WIDTH);
+});
+
+/**
+ * 宽度敏感组件的桩：`WIDTH` 下留 2 格行尾空白，其它宽度排满整行。
+ * 用来检查缓存键跟着渲染宽度走：换个宽度渲染时不能复用上一次的结果。
+ */
+class ResizeStub {
+	render(width: number): readonly string[] {
+		return [width === WIDTH ? "X".repeat(WIDTH - 2) + "  " : "X".repeat(width)];
+	}
+}
+installGutter(ResizeStub, Symbol.for("pi-toolkit.test.resize-gutter"));
+
+check("加宽 2 列后不复用上一宽度的缓存", () => {
+	const component = new ResizeStub();
+	assert.equal(visibleWidth(component.render(WIDTH)[0]!), WIDTH, "初始宽度应铺满");
+	const after = component.render(WIDTH + 2);
+	assert.deepEqual(after, new ResizeStub().render(WIDTH + 2));
+	assert.equal(visibleWidth(after[0]!), WIDTH + 2, JSON.stringify(after));
 });
 
 check("重复安装系统组件不叠加缩进", () => {
