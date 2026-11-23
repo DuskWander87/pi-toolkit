@@ -9,7 +9,7 @@
 <details>
 <summary>执行中：已完成部分收成摘要，正在跑的工具行留在摘要下方</summary>
 
-![执行中只多一条带实时计时的工具行](../../../assets/tool-run-groups-running.png)
+![执行中只多一条正在跑的工具行](../../../assets/tool-run-groups-running.png)
 
 </details>
 
@@ -22,22 +22,21 @@
 
 ```text
 收起
-  Thought for 12s, ran 3 shell commands
+  Thought for 12s, ran 3 bash commands
 ● edit test/render/minimal-tools.test.ts
-  └ Added 2 lines, removed 1 line
   ... (4 more lines, ctrl+o to expand)
+  +2 −1
 
 单条调用
   Thought for 1s, ran 1 read call
   ... (read 的路径与内容在展开后可见)
 
 执行中（已完成部分收成摘要，正在跑的工具行留在摘要下方）
-  Thought for 6s, ran 5 shell commands
-● $ npm test
-   shell · running (12.0s)
+  Thought for 6s, ran 5 bash commands
+● bash npm test
 
 有失败时
-  Thought for 12s, ran 3 shell commands · 1 failed
+  Thought for 12s, ran 3 bash commands · 1 failed
 ```
 
 摘要行缩进 2 列，与 `message-marks` 的标记栏对齐；摘要行本身不带圆点。`edit` / `write` 始终逐条可见，不靠摘要行代表。
@@ -63,7 +62,7 @@
 
 - 回复正文是硬边界：正文先于摘要行渲染，它之后的思考与工具调用另起一行摘要，不并入上面那一行
 - 单轮内只有一条工具调用时第一级不聚合，由区间摘要折叠成 `ran 1 read call`
-- 执行中的工具行不折叠：区间里已结束的调用（含并行调用中先结束的）先收成摘要行，只有正在跑的工具行留在摘要下方，保留命令行、流式输出与实时计时；工具结束后由 `tool_execution_end` 触发一次重新扫描，并入同一行摘要
+- 执行中的工具行不折叠：区间里已结束的调用（含并行调用中先结束的）先收成摘要行，只有正在跑的工具行留在摘要下方，保留调用行；工具结束后由 `tool_execution_end` 触发一次重新扫描，并入同一行摘要
 - `edit` / `write` 始终逐条渲染；它们可以出现在折叠区间内，但不计入摘要
 - 被中断、报错或截断的轮次是硬边界
 - 用户消息是硬边界；区间前那条回复留在区间外，作为摘要行的耗时来源
@@ -72,15 +71,15 @@
 
 | 状态 | 文案 |
 |---|---|
-| 收起，有思考耗时 | `Thought for 28s, ran 8 shell commands` |
-| 收起，无思考耗时 | `ran 8 shell commands` |
+| 收起，有思考耗时 | `Thought for 28s, ran 8 bash commands` |
+| 收起，无思考耗时 | `ran 8 bash commands` |
 | 有失败 | 在末尾追加 ` · 1 failed`，只有这一段标红，摘要正文保持 dim |
 
-执行中的工具行不产生摘要，摘要只统计已结束的调用；它们保持原行与实时计时，工具结束后并入摘要行。并行调用中先结束的调用照常计入摘要，不等还在跑的那条。
+执行中的工具行不产生摘要，摘要只统计已结束的调用；它们保持原行，工具结束后并入摘要行。并行调用中先结束的调用照常计入摘要，不等还在跑的那条。
 
-工具名按首次出现顺序汇总，`bash` 显示为 `shell`：
+摘要按工具注册名汇总，不另起展示别名。`bash` 跑的是命令，量词用 `commands`：
 
-- `2 shell commands`
+- `2 bash commands`
 - `1 read call` / `3 read calls`
 
 ### 思考耗时
@@ -114,7 +113,7 @@ pi remove ./pi-toolkit/extensions/render/tool-run-groups    # 卸载
 
 - 单独安装即可工作，Pi 内置工具行与 `minimal-tools` 渲染的工具行都能聚合
 - 与 `message-marks` 共用 2 列标记栏：摘要行缩进 2 列，但不由 `message-marks` 加圆点
-- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是两阶段渲染的完整内容；执行中的工具行按 `minimal-tools` 的实时行呈现，结束后并入摘要行
+- 与 `minimal-tools` 一起装时，展开后的每个工具行仍是完整的调用行 + 输出块；执行中的工具行就是那一行调用行，结束后并入摘要行
 
 ## 限制
 
@@ -125,7 +124,7 @@ pi remove ./pi-toolkit/extensions/render/tool-run-groups    # 卸载
 
 ### 已知问题
 
-- **执行期间会多出正在跑的工具行**：正在跑的工具行不进摘要，于是执行中看到的是「一行摘要 + 正在跑的工具行」，工具跑完才收敛成一行摘要。实时计时与「执行期间也只有一行」不可兼得，当前选前者：长命令执行期间，命令行、输出和计时比提前合并更有用
+- **执行期间会多出正在跑的工具行**：正在跑的工具行不进摘要，执行中看到的是「一行摘要 + 一行正在跑的工具行」，工具跑完才收敛成一行摘要
 - **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，只存在内存里；任何按 session entry 重建视图的路径（`-r` / `-c`、`/tree` 跳分支、`/reload`、切换 cache miss 提示）都会换了一批新组件，摘要行与隐藏标签不带 `Thought for Ns`，收起态也就看不到那一轮思考过的痕迹。Pi 不持久化思考耗时（`AssistantMessage` 里没有耗时字段）
 - **思考可见性同步只覆盖摘要与工具组**：收起时由摘要行管理思考正文（含区间前那条回复），展开时按 Pi 的设置显示；摘要之外的回复与其他容器沿用 Pi 原本的处理
 

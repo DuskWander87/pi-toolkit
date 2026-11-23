@@ -82,9 +82,9 @@ function groupOf(mode: { chatContainer: Container }): ToolRunGroup {
 	return groups[0] as ToolRunGroup;
 }
 
-check("按首次出现顺序汇总，shell 用 command 作量词", () => {
-	assert.equal(summarize(["bash", "read", "bash"]), "2 shell commands, 1 read call");
-	assert.equal(summarize(["bash"]), "1 shell command");
+check("按首次出现顺序汇总，bash 用 command 作量词", () => {
+	assert.equal(summarize(["bash", "read", "bash"]), "2 bash commands, 1 read call");
+	assert.equal(summarize(["bash"]), "1 bash command");
 	assert.equal(summarize(["read", "read"]), "2 read calls");
 	assert.equal(summarize(["grep", "find", "ls"]), "1 grep call, 1 find call, 1 ls call");
 });
@@ -97,9 +97,9 @@ check("edit / write 与单条调用不聚合", () => {
 });
 
 check("摘要带思考耗时时四舍五入到秒", () => {
-	assert.equal(describeRun(["bash", "bash"], 2400), "Thought for 2s, ran 2 shell commands");
-	assert.equal(describeRun(["bash", "bash"], 40), "Thought for 1s, ran 2 shell commands");
-	assert.equal(describeRun(["bash", "bash"]), "ran 2 shell commands");
+	assert.equal(describeRun(["bash", "bash"], 2400), "Thought for 2s, ran 2 bash commands");
+	assert.equal(describeRun(["bash", "bash"], 40), "Thought for 1s, ran 2 bash commands");
+	assert.equal(describeRun(["bash", "bash"]), "ran 2 bash commands");
 });
 
 check("相邻工具行合并为一个聚合组件", () => {
@@ -156,7 +156,7 @@ check("收起态是空行 + 一行摘要，缩进到标记栏所在列", () => {
 	const lines = plain(groupOf(mode).render(WIDTH));
 	assert.equal(lines.length, 2);
 	assert.equal(lines[0], "");
-	assert.equal(lines[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(lines[1]!.trimStart(), "ran 2 bash commands");
 	assert.equal(lines[1]!.length - lines[1]!.trimStart().length, 2);
 });
 
@@ -171,7 +171,7 @@ check("展开态先摘要行，再铺开每个工具行的完整内容", () => {
 	group.setExpanded(true);
 	const lines = plain(group.render(WIDTH));
 	assert.equal(lines[0], "");
-	assert.equal(lines[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(lines[1]!.trimStart(), "ran 2 bash commands");
 	assert.equal(lines.length, 2 + expected.render(WIDTH).length);
 	// 展开态下 Pi 把参数铺成 `command: ls` 这样的多行，这里只校验内容已铺开。
 	assert.ok(lines.slice(2).some((line) => line.includes("command")), JSON.stringify(lines));
@@ -181,7 +181,7 @@ check("失败时标注数量", () => {
 	const failed = fakeMode([finishedBash("c1", "ls"), finish(bashRow("c2", "pwd"), true)]);
 	groupToolRuns(failed);
 	const line = plain(groupOf(failed).render(WIDTH))[1]!;
-	assert.ok(line.includes("ran 2 shell commands"), line);
+	assert.ok(line.includes("ran 2 bash commands"), line);
 	assert.ok(line.includes("1 failed"), line);
 });
 
@@ -196,7 +196,7 @@ check("失败只把计数片段标红，摘要正文保持 dim", () => {
 		requestRender() {},
 	});
 	const groupLine = group.render(200)[1]!;
-	assert.ok(groupLine.includes("{dim|ran 2 shell commands}"), groupLine);
+	assert.ok(groupLine.includes("{dim|ran 2 bash commands}"), groupLine);
 	assert.ok(groupLine.includes("{error| · 1 failed}"), groupLine);
 
 	const summary = new ToolRunSummary({
@@ -206,7 +206,7 @@ check("失败只把计数片段标红，摘要正文保持 dim", () => {
 		requestRender() {},
 	});
 	const summaryLine = summary.render(200)[1]!;
-	assert.ok(summaryLine.includes("{dim|ran 2 shell commands}"), summaryLine);
+	assert.ok(summaryLine.includes("{dim|ran 2 bash commands}"), summaryLine);
 	assert.ok(summaryLine.includes("{error| · 1 failed}"), summaryLine);
 });
 
@@ -283,7 +283,7 @@ check("显示思考时，收起态也不渲染静默轮次的思考正文", () =
 
 	const collapsed = plain(summary.render(WIDTH));
 	assert.equal(collapsed.length, 2, JSON.stringify(collapsed));
-	assert.equal(collapsed[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(collapsed[1]!.trimStart(), "Thought for 2s, ran 2 bash commands");
 	assert.equal(collapsed.join("\n").includes("这是一段很长的思考正文"), false, JSON.stringify(collapsed));
 
 	summary.setExpanded(true);
@@ -312,8 +312,8 @@ check("带正文的回复把区间分成两行摘要，正文留在两行之间"
 	assert.equal(mode.chatContainer.children.indexOf(before!), 0);
 	assert.equal(mode.chatContainer.children.indexOf(answer), 1, "正文紧跟在它上方那行摘要后");
 	assert.equal(mode.chatContainer.children.indexOf(after!), 2, "正文之后的调用另起一行摘要");
-	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
-	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
+	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
 
 	const rendered = () => plain(mode.chatContainer.render(WIDTH)).join("\n");
 	assert.ok(rendered().includes("我发现了问题"), rendered());
@@ -386,7 +386,7 @@ check("最终纯文本回复留在摘要外，保留自己的耗时标签", () =
 		assert.equal(summaries[0]!.children.includes(final), false, "最终回复不并入摘要");
 		assert.equal(mode.chatContainer.children.at(-1), final, "最终回复留在摘要下方");
 		const lines = plain(summaries[0]!.render(WIDTH));
-		assert.equal(lines[1]!.trimStart(), "ran 2 shell commands", "最终回复的耗时不算进上方摘要");
+		assert.equal(lines[1]!.trimStart(), "ran 2 bash commands", "最终回复的耗时不算进上方摘要");
 		const reply = plain(final.render(WIDTH)).join("\n");
 		assert.ok(reply.includes("已经修好了。"), reply);
 		assert.ok(reply.includes("Thought for 1s"), reply);
@@ -411,7 +411,7 @@ check("连续静默轮次合并成一行摘要，耗时按轮累加", () => {
 	const summary = summariesOf(mode)[0]!;
 	const lines = plain(summary.render(WIDTH));
 	assert.equal(lines.length, 2);
-	assert.equal(lines[1]!.trimStart(), "Thought for 3s, ran 4 shell commands");
+	assert.equal(lines[1]!.trimStart(), "Thought for 3s, ran 4 bash commands");
 });
 
 check("多轮摘要展开后是完整时间线", () => {
@@ -430,11 +430,11 @@ check("多轮摘要展开后是完整时间线", () => {
 
 	const lines = plain(summary.render(WIDTH));
 	assert.equal(lines[0], "");
-	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(lines[1]!.trimStart(), "ran 4 bash commands");
 	// 耗时已在摘要行，展开的静默轮次不再重复显示占位标签。
 	assert.equal(lines.filter((line) => line.includes("Thinking...")).length, 0, JSON.stringify(lines));
 	// 折叠内仍有两组各自的摘要行。
-	assert.equal(lines.filter((line) => line.trimStart().startsWith("ran 2 shell commands")).length, 2);
+	assert.equal(lines.filter((line) => line.trimStart().startsWith("ran 2 bash commands")).length, 2);
 	assert.ok(lines.length > 8, JSON.stringify(lines));
 });
 
@@ -453,7 +453,7 @@ check("展开摘要不为已计入的静默轮次重复显示耗时标签", () =
 	const summary = summariesOf(mode)[0]!;
 	summary.setExpanded(true);
 	const lines = plain(summary.render(WIDTH));
-	assert.equal(lines[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(lines[1]!.trimStart(), "Thought for 2s, ran 2 bash commands");
 	assert.equal(lines.filter((line) => line.includes("Thought for 2s")).length, 1, JSON.stringify(lines));
 });
 
@@ -474,7 +474,7 @@ check("请求开头带文本的回复留在摘要外，它引发的工具并入�
 	assert.equal(mode.chatContainer.children[0], text);
 	const summary = summariesOf(mode)[0]!;
 	assert.equal(summary.children.includes(text), false, "带文本的回复不进入折叠");
-	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 5s, ran 4 shell commands");
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 5s, ran 4 bash commands");
 });
 
 check("带文本回复的耗时并入摘要后，不再单独显示耗时标签", () => {
@@ -490,7 +490,7 @@ check("带文本回复的耗时并入摘要后，不再单独显示耗时标签"
 	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
 
 	const summary = summariesOf(mode)[0]!;
-	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 bash commands");
 	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"), false, "标签不应与摘要行重复");
 });
 
@@ -504,7 +504,7 @@ check("只有一条工具调用时也合成一行摘要", () => {
 	assert.equal(summariesOf(mode).length, 1);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"Thought for 2s, ran 1 shell command",
+		"Thought for 2s, ran 1 bash command",
 	);
 	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for 2s"), false);
 });
@@ -533,7 +533,7 @@ check("同一请求的工具段随轮次增长合入同一行摘要", () => {
 	assert.equal(summariesOf(mode).length, 1);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"Thought for 1s, ran 2 shell commands",
+		"Thought for 1s, ran 2 bash commands",
 	);
 
 	mode.chatContainer.addChild(assistantRow({}));
@@ -546,7 +546,7 @@ check("同一请求的工具段随轮次增长合入同一行摘要", () => {
 	assert.equal(mode.chatContainer.children[0], text);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"Thought for 1s, ran 4 shell commands",
+		"Thought for 1s, ran 4 bash commands",
 	);
 });
 
@@ -569,7 +569,7 @@ check("执行中：已完成部分收成摘要，执行中的工具行留在摘�
 	assert.equal(mode.chatContainer.children[1], running, "执行中的行紧跟在摘要下方");
 	assert.equal(
 		plain(summaries[0]!.render(WIDTH))[1]!.trimStart(),
-		"Thought for 3s, ran 2 shell commands",
+		"Thought for 3s, ran 2 bash commands",
 	);
 });
 
@@ -619,7 +619,7 @@ check("执行中的改动行留在摘要之外，摘要只覆盖已完成部分"
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 1);
 	assert.equal(mode.chatContainer.children.includes(edit), true);
-	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
 });
 
 check("并行调用中先结束的调用并入摘要，仍在执行的留在下方", () => {
@@ -646,7 +646,7 @@ check("并行调用中先结束的调用并入摘要，仍在执行的留在下�
 	assert.equal(summaries.length, 1);
 	assert.equal(
 		plain(summaries[0]!.render(WIDTH))[1]!.trimStart(),
-		"ran 3 shell commands",
+		"ran 3 bash commands",
 		"先结束的调用计入摘要",
 	);
 	assert.equal(summaries[0]!.children.includes(fast), true);
@@ -657,7 +657,7 @@ check("并行调用中先结束的调用并入摘要，仍在执行的留在下�
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
 	assert.equal(mode.chatContainer.children.length, 1);
-	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 bash commands");
 });
 
 check("并行调用按发起顺序汇总，先结束的调用不改变顺序", () => {
@@ -668,7 +668,7 @@ check("并行调用按发起顺序汇总，先结束的调用不改变顺序", (
 	groupSilentTurns(mode);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"ran 1 shell command",
+		"ran 1 bash command",
 		"先结束的调用先计入摘要",
 	);
 
@@ -678,7 +678,7 @@ check("并行调用按发起顺序汇总，先结束的调用不改变顺序", (
 	const summary = summariesOf(mode)[0]!;
 	assert.equal(
 		plain(summary.render(WIDTH))[1]!.trimStart(),
-		"ran 1 read call, 1 shell command",
+		"ran 1 read call, 1 bash command",
 		"摘要按发起顺序汇总",
 	);
 	assert.ok(
@@ -696,7 +696,7 @@ check("三条并行调用逆序结束时，摘要仍按发起顺序汇总", () =
 	groupSilentTurns(mode);
 	assert.equal(
 		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
-		"ran 1 shell command",
+		"ran 1 bash command",
 		"只有已结束的调用计入摘要",
 	);
 
@@ -709,7 +709,7 @@ check("三条并行调用逆序结束时，摘要仍按发起顺序汇总", () =
 	const summary = summariesOf(mode)[0]!;
 	assert.equal(
 		plain(summary.render(WIDTH))[1]!.trimStart(),
-		"ran 1 read call, 1 grep call, 1 shell command",
+		"ran 1 read call, 1 grep call, 1 bash command",
 	);
 	assert.deepEqual(summary.children.slice(1), [read, grep, bash], "展开时间线保持发起顺序");
 });
@@ -722,7 +722,7 @@ check("执行中的改动行与已完成的工具行并存", () => {
 	groupSilentTurns(mode);
 
 	const summary = summariesOf(mode)[0]!;
-	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 1 bash command");
 	assert.equal(summary.children.includes(edit), false, "执行中的改动行不进摘要");
 	assert.deepEqual(mode.chatContainer.children, [summary, edit]);
 
@@ -739,7 +739,7 @@ check("摘要之后追加的执行中行被重扫保留在摘要下方", () => {
 	const mode = fakeMode([assistantRow({}), bash]);
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
-	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 1 bash command");
 
 	// 模拟 Pi 在 `tool_execution_start` 时把新工具行追加到容器末尾。
 	const next = toolRow("read", "r1", { path: "a.ts" });
@@ -751,7 +751,7 @@ check("摘要之后追加的执行中行被重扫保留在摘要下方", () => {
 	const rebuilt = summariesOf(mode)[0]!;
 	assert.equal(rebuilt.children.includes(next), false, "执行中的行不进摘要");
 	assert.equal(mode.chatContainer.children.at(-1), next, "执行中的行留在摘要下方");
-	assert.equal(plain(rebuilt.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(plain(rebuilt.render(WIDTH))[1]!.trimStart(), "ran 1 bash command");
 });
 
 check("执行中切到展开后，工具结束重建仍按发起顺序且保持展开", () => {
@@ -780,7 +780,7 @@ check("多个摘要并存时，执行中行留在自己的区间下方", () => {
 	groupSilentTurns(mode);
 
 	const first = summariesOf(mode)[0]!;
-	assert.equal(plain(first.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(plain(first.render(WIDTH))[1]!.trimStart(), "ran 1 bash command");
 	assert.equal(mode.chatContainer.children.at(-1), running);
 
 	finish(running);
@@ -790,7 +790,7 @@ check("多个摘要并存时，执行中行留在自己的区间下方", () => {
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 2, "两个请求各一行摘要");
 	assert.equal(summaries[0], first, "前一个区间未变化，实例复用");
-	assert.equal(plain(summaries[1]!.render(WIDTH))[1]!.trimStart(), "ran 1 shell command");
+	assert.equal(plain(summaries[1]!.render(WIDTH))[1]!.trimStart(), "ran 1 bash command");
 	assert.equal(mode.chatContainer.children.at(-1), summaries[1], "后一个区间收成一行");
 });
 
@@ -813,7 +813,7 @@ check("工具结束后并入同一行摘要", () => {
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 1);
 	assert.equal(mode.chatContainer.children.length, 1);
-	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 3 shell commands");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 3 bash commands");
 });
 
 check("请求中间的正文把区间分段，每段各一行摘要", () => {
@@ -838,10 +838,10 @@ check("请求中间的正文把区间分段，每段各一行摘要", () => {
 
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 2, "正文之后的调用另起一行摘要");
-	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 4 bash commands");
 	assert.equal(
 		plain(summaries[1]!.render(WIDTH))[1]!.trimStart(),
-		"ran 4 shell commands",
+		"ran 4 bash commands",
 		"正文之后的两段静默轮次仍合入同一行",
 	);
 	assert.deepEqual(mode.chatContainer.children, [summaries[0], answer, summaries[1]], "正文留在两行摘要之间");
@@ -866,8 +866,8 @@ check("正文之后的调用另起摘要，正文的耗时只计入下面那一�
 	groupSilentTurns(mode, { thoughtMsFor: (item) => (item === text ? 2000 : undefined) });
 
 	const [before, after] = summariesOf(mode);
-	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
-	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 shell commands");
+	assert.equal(plain(before!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
+	assert.equal(plain(after!.render(WIDTH))[1]!.trimStart(), "Thought for 2s, ran 2 bash commands");
 	assert.equal(plain(text.render(WIDTH)).join("\n").includes("Thought for"), false, "耗时只出现在下面那行摘要");
 });
 
@@ -926,7 +926,7 @@ check("报错与中断的前置消息保留自己的耗时标签", () => {
 		groupSilentTurns(mode, { thoughtMsFor: (item) => (item === failed ? 3000 : undefined) });
 
 		const summary = summariesOf(mode)[0]!;
-		assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands", stopReason);
+		assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands", stopReason);
 		assert.ok(
 			plain(failed.render(WIDTH)).join("\n").includes("Thought for 3s"),
 			`${stopReason}: 标签应保留`,
@@ -946,7 +946,7 @@ check("单条工具行组成的静默轮次同样折叠", () => {
 
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 1);
-	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
 });
 
 check("edit 不计入摘要行的工具段，仍逐条渲染", () => {
@@ -963,7 +963,7 @@ check("edit 不计入摘要行的工具段，仍逐条渲染", () => {
 
 	const summaries = summariesOf(mode);
 	assert.equal(summaries.length, 1);
-	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(summaries[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
 	assert.equal(summaries[0]!.children.includes(edit), true);
 });
 
@@ -986,7 +986,7 @@ check("edit / write 参与区间但不被摘要行代表，收起时逐条渲染
 	assert.equal(summaries[0]!.children.includes(edit), true);
 	const lines = plain(summaries[0]!.render(WIDTH));
 	// 摘要行只统计普通调用，改动内容在下面逐条显式。
-	assert.equal(lines[1]!.trimStart(), "ran 4 shell commands");
+	assert.equal(lines[1]!.trimStart(), "ran 4 bash commands");
 	assert.ok(
 		lines.some((line) => line.includes("path=\"a.ts\"")),
 		JSON.stringify(lines),
@@ -1019,7 +1019,7 @@ check("重复折叠复用实例并保留展开状态", () => {
 	const second = summariesOf(mode)[0]!;
 	assert.notEqual(second, first);
 	assert.equal(second.expanded, true);
-	assert.ok(plain(second.render(WIDTH))[1]!.includes("6 shell commands"));
+	assert.ok(plain(second.render(WIDTH))[1]!.includes("6 bash commands"));
 });
 
 check("Ctrl+O 的展开态传递到多轮摘要内的工具行", () => {
@@ -1046,7 +1046,7 @@ check("思考结束后隐藏思考标签显示实际耗时", () => {
 	assert.equal(thoughtLabel(1500).endsWith("Thought for 2s"), true, thoughtLabel(1500));
 	assert.equal(thoughtLabel(200).endsWith("Thought for 1s"), true, thoughtLabel(200));
 	assert.ok(thoughtLabel(1500).startsWith("\x1b[0m"), "需重置 pi 的斜体包裹");
-	assert.equal(describeRun(["bash", "bash"], 1500), "Thought for 2s, ran 2 shell commands");
+	assert.equal(describeRun(["bash", "bash"], 1500), "Thought for 2s, ran 2 bash commands");
 
 	const assistant = assistantRow({ thinking: "想一想" });
 	assert.ok(plain(assistant.render(WIDTH)).join("\n").includes("Thinking..."), "初始为占位标签");
@@ -1177,7 +1177,7 @@ check("正文之后的调用另起一行摘要，耗时按段累加", () => {
 	const summary = summariesOf(mode)[0]!;
 	assert.deepEqual(mode.chatContainer.children, [first, summary, second], "正文把两行摘要分开");
 	// 第一段摘要累加区间前那条回复与区间内静默轮次的耗时。
-	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 3s, ran 2 shell commands");
+	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 3s, ran 2 bash commands");
 	assert.equal(plain(first.render(WIDTH)).join("\n").includes("Thought for"), false, "耗时已在摘要行");
 	// 收尾回复不再被吸收，保留自己的耗时标签。
 	assert.ok(plain(second.render(WIDTH)).join("\n").includes("Thought for 1s"));
@@ -1248,7 +1248,7 @@ check("重复安装接管仍成功且不叠加处理", () => {
 	refreshToolRuns(mode);
 
 	assert.equal(mode.chatContainer.children.length, 1);
-	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 shell commands");
+	assert.equal(plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(), "ran 2 bash commands");
 });
 
 finishSuite();

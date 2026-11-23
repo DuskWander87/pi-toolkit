@@ -1,0 +1,20 @@
+{
+	"name": "pi-toolkit-run-clock",
+	"version": "0.1.0",
+	"description": "Pi coding agent 的请求墙钟：耗时与生成 token 数显示在输入框上方，请求期间隐藏 working 行",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/DuskWander87/pi-toolkit.git",
+		"directory": "extensions/render/run-clock"
+	},
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"files": ["index.ts"],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	}
+}

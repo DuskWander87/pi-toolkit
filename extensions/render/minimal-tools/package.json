@@ -1,7 +1,7 @@
 {
 	"name": "pi-toolkit-minimal-tools",
 	"version": "0.1.0",
-	"description": "Pi coding agent 的工具行两阶段显示：执行中可见，结束后收成一行摘要",
+	"description": "Pi coding agent 的工具行显示：调用行带参数，结束后收成一行",
 	"type": "module",
 	"license": "MIT",
 	"repository": {

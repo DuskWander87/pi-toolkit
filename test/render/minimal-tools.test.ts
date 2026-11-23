@@ -95,7 +95,6 @@ function dedent(value: string): string {
 		.join("\n");
 }
 
-/** 把行首缩进量单独输出，便于人工核对对齐。 */
 console.log("== 行首缩进（outputPad=1） ==");
 {
 	const r = renderers("bash");
@@ -109,48 +108,25 @@ console.log("== 行首缩进（outputPad=1） ==");
 	);
 }
 
-// ---------------------------------------------------------------- 1. 运行中占位
-check("bash 执行中：显示命令行 + running 占位与已用时间", () => {
+// ---------------------------------------------------------------- 1. 运行中
+check("bash 执行中：只有调用行，结果行不占行", () => {
 	const r = renderers("bash");
-	const running = ctx({ isPartial: true, durationMs: undefined, state: { startedAt: Date.now() - 1500 } });
-	assert.equal(dedent(text(r.renderCall({ command: "sleep 5" }, theme, running))), "$ sleep 5");
-	const line = dedent(text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)));
-	assert.match(line, /^shell · running \(1\.[5-6]s\)$/, line);
+	const running = ctx({ isPartial: true, durationMs: undefined, args: { command: "sleep 5" } });
+	assert.equal(dedent(text(r.renderCall({ command: "sleep 5" }, theme, running))), "bash sleep 5");
+	assert.equal(
+		text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)),
+		"",
+		"运行中不再另占一行",
+	);
 });
 
-check("运行中计时按秒重绘，结束后停止", () => {
-	const r = renderers("bash");
-	let redraws = 0;
-	const running = ctx({
-		isPartial: true,
-		durationMs: undefined,
-		state: { startedAt: Date.now() },
-		invalidate: () => redraws++,
-	});
-	r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running);
-	const interval = (running.state as { interval?: ReturnType<typeof setInterval> }).interval;
-	assert.ok(interval !== undefined, "运行中未启动重绘计时器");
-
-	const done = ctx({ durationMs: 163, state: running.state });
-	r.renderResult({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: false }, theme, done);
-	assert.equal((done.state as { interval?: unknown }).interval, undefined, "结束后计时器未停止");
-	clearInterval(interval);
-	void redraws;
-});
-
-check("无计时起点时降级为无耗时占位", () => {
-	const r = renderers("bash");
-	const running = ctx({ isPartial: true, executionStarted: false, durationMs: undefined, state: {} });
-	const line = dedent(text(r.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)));
-	assert.equal(line, "shell · running");
-});
 
 // ---------------------------------------------------------------- 2. 超长命令截断
 check("bash 超长命令（150 字符）截断为 100 字符 + 省略号", () => {
 	const r = renderers("bash");
 	const call = dedent(text(r.renderCall({ command: "x".repeat(150) }, theme, ctx({ isPartial: true, durationMs: undefined }))));
 	assert.ok(call.endsWith("…"), `未截断: ...${call.slice(-6)}`);
-	assert.equal(call.slice(2).length, 101, `正文长度 ${call.slice(2).length}`);
+	assert.equal(call.slice("bash ".length).length, 101, `正文长度 ${call.slice("bash ".length).length}`);
 });
 
 // ---------------------------------------------------------------- 3. 多行命令单行化
@@ -159,17 +135,17 @@ check("bash 多行命令压成单行", () => {
 	const call = dedent(
 		text(r.renderCall({ command: "echo 1\necho 2\n\n  echo 3\t" }, theme, ctx({ isPartial: true, durationMs: undefined }))),
 	);
-	assert.equal(call, "$ echo 1 echo 2 echo 3");
+	assert.equal(call, "bash echo 1 echo 2 echo 3");
 });
 
 // ---------------------------------------------------------------- 4. 结束收起
-check("bash 结束后收起为单行摘要，命令行消失", () => {
+check("bash 结束后收起：调用行让位，只留一行 `bash <命令>`", () => {
 	const r = renderers("bash");
-	const done = ctx({ durationMs: 163 });
-	assert.equal(text(r.renderCall({ command: "echo hi" }, theme, done)), "", "renderCall 应收起为空");
+	const done = ctx({ args: { command: "echo hi" } });
+	assert.equal(text(r.renderCall({ command: "echo hi" }, theme, done)), "", "收起态调用行应让位给摘要行");
 	assert.equal(
 		dedent(text(r.renderResult({ content: [{ type: "text", text: "hi" }] }, { expanded: false, isPartial: false }, theme, done))),
-		"shell (163ms)",
+		"bash echo hi",
 	);
 });
 
@@ -178,8 +154,8 @@ check("bash 出错：命令行保留 + 错误块 + 空行压缩", () => {
 	usedColors.clear();
 	const r = renderers("bash");
 	const failed = ctx({ isError: true, durationMs: 12 });
-	assert.equal(dedent(text(r.renderCall({ command: "false" }, theme, failed))), "$ false");
-	assert.ok(usedColors.has("fg:muted"), "出错命令行未用 muted 着色");
+	assert.equal(dedent(text(r.renderCall({ command: "false" }, theme, failed))), "bash false");
+	assert.ok(usedColors.has("fg:toolTitle"), "调用行未用 toolTitle 着色");
 
 	usedColors.clear();
 	const result = text(
@@ -192,75 +168,114 @@ check("bash 出错：命令行保留 + 错误块 + 空行压缩", () => {
 });
 
 // ---------------------------------------------------------------- 6. 展开
-check("bash 展开：命令行 + 输出同块，无耗时", () => {
+check("bash 展开：标题行在外，正文独占块", () => {
 	const r = renderers("bash");
-	const expanded = ctx({ durationMs: 90, args: { command: "ls -la" } });
-	assert.equal(text(r.renderCall({ command: "ls -la" }, theme, expanded)), "", "展开态 renderCall 应为空");
+	const expanded = ctx({ durationMs: 90, expanded: true, args: { command: "ls -la" } });
+	assert.equal(dedent(text(r.renderCall({ command: "ls -la" }, theme, expanded))), "bash ls -la");
 	const result = text(r.renderResult({ content: [{ type: "text", text: "a\nb" }] }, { expanded: true, isPartial: false }, theme, expanded));
-	assert.equal(dedent(result), "$ ls -la\na\nb");
+	assert.equal(dedent(result), "a\nb");
 });
 
-// ---------------------------------------------------------------- 7. 摘要文案
-check("各工具收起摘要文案", () => {
+// ---------------------------------------------------------------- 7. 收起摘要
+check("各工具收起：一行 `调用行 · 量化`，调用行让位", () => {
 	const cases: Array<[string, any, Record<string, unknown>, string]> = [
-		["read", { content: [{ type: "text", text: "l1\nl2\nl3" }] }, {}, "read 3 lines (163ms)"],
-		["read", { content: [{ type: "text", text: "only" }] }, {}, "read 1 line (163ms)"],
-		["grep", { content: [{ type: "text", text: "m1\nm2" }] }, {}, "grep 2 matches (163ms)"],
-		["grep", { content: [{ type: "text", text: "m1" }] }, {}, "grep 1 match (163ms)"],
-		["find", { content: [{ type: "text", text: "f1" }] }, {}, "found 1 file (163ms)"],
-		["ls", { content: [{ type: "text", text: "a\nb\nc" }] }, {}, "ls . · 3 entries (163ms)"],
-		["ls", { content: [{ type: "text", text: "a" }] }, { args: { path: "src" } }, "ls src · 1 entry (163ms)"],
+		["read", { content: [{ type: "text", text: "l1\nl2\nl3" }] }, { args: { path: "src/a.ts" } }, "read src/a.ts · 3 lines"],
+		["read", { content: [{ type: "text", text: "only" }] }, { args: { path: "a.ts" } }, "read a.ts · 1 line"],
+		["grep", { content: [{ type: "text", text: "m1\nm2" }] }, { args: { pattern: "TODO" } }, "grep /TODO/ · 2 matches"],
+		["grep", { content: [{ type: "text", text: "m1" }] }, { args: { pattern: "TODO" } }, "grep /TODO/ · 1 match"],
+		["find", { content: [{ type: "text", text: "f1" }] }, { args: { pattern: "*.ts" } }, "find *.ts · 1 file"],
+		["ls", { content: [{ type: "text", text: "a\nb\nc" }] }, {}, "ls . · 3 entries"],
+		["ls", { content: [{ type: "text", text: "a" }] }, { args: { path: "src" } }, "ls src · 1 entry"],
 	];
 	for (const [name, result, overrides, expected] of cases) {
 		const r = renderers(name);
-		const got = dedent(text(r.renderResult(result, { expanded: false, isPartial: false }, theme, ctx(overrides))));
-		assert.equal(got, expected, `${name}: ${got}`);
+		const context = ctx(overrides);
+		assert.equal(
+			dedent(text(r.renderResult(result, { expanded: false, isPartial: false }, theme, context))),
+			expected,
+			name,
+		);
+		assert.equal(text(r.renderCall(context.args, theme, context)), "", `${name}: 收起态调用行应让位`);
 	}
+});
+
+check("历史回放的收起态只留结果行", () => {
+	// Pi 的回放路径只调 `setExpanded` 与 `updateResult`，不调 `markExecutionStarted` /
+	// `setArgsComplete`，两个字段都是 `false`；渲染器不能把它当成「正在跑」。
+	const cases: Array<[string, Record<string, unknown>, string]> = [
+		["bash", { command: "npm test" }, "bash npm test"],
+		["read", { path: "src/a.ts" }, "read src/a.ts · 3 lines"],
+		["weird-tool", { script: "Get-Process" }, "weird-tool Get-Process · 3 lines"],
+	];
+	for (const [name, args, summary] of cases) {
+		const r = renderers(name);
+		const context = ctx({ executionStarted: false, argsComplete: false, args });
+		assert.equal(text(r.renderCall(args, theme, context)), "", `${name}: 回放态调用行应让位`);
+		assert.equal(
+			dedent(text(r.renderResult({ content: [{ type: "text", text: "a\nb\nc" }] }, { expanded: false, isPartial: false }, theme, context))),
+			summary,
+			name,
+		);
+	}
+});
+
+check("实时流程里参数已齐、工具尚未开始时调用行仍在", () => {
+	const pending = ctx({ executionStarted: false, argsComplete: true });
+	assert.equal(dedent(text(renderers("bash").renderCall({ command: "npm test" }, theme, pending))), "bash npm test");
+});
+
+check("收起摘要的量化用 dim，标题沿用 toolTitle / accent", () => {
+	const r = renderers("grep");
+	const context = ctx({ args: { pattern: "TODO" } });
+	usedColors.clear();
+	text(r.renderResult({ content: [{ type: "text", text: "m1\nm2" }] }, { expanded: false, isPartial: false }, theme, context));
+	assert.ok(usedColors.has("fg:toolTitle"), "摘要行的工具名未用 toolTitle");
+	assert.ok(usedColors.has("fg:accent"), "摘要行的参数未用 accent");
+	assert.ok(usedColors.has("fg:dim"), "摘要行的量化未用 dim");
 });
 
 check("read 截断与空行按数据行计数", () => {
 	const r = renderers("read");
 	const cases: Array<[string, string]> = [
-		["l1\nl2\nl3\n\n[120 more lines...]", "read 3 lines (163ms)"],
-		["a\n\nb", "read 3 lines (163ms)"],
-		["l1\nl2", "read 2 lines (163ms)"],
-		["l1\nl2\n", "read 2 lines (163ms)"],
+		["l1\nl2\nl3\n\n[120 more lines...]", "3 lines"],
+		["a\n\nb", "3 lines"],
+		["l1\nl2", "2 lines"],
+		["l1\nl2\n", "2 lines"],
 	];
 	for (const [output, expected] of cases) {
 		const got = dedent(
 			text(r.renderResult({ content: [{ type: "text", text: output }] }, { expanded: false, isPartial: false }, theme, ctx())),
 		);
-		assert.equal(got, expected, JSON.stringify(output));
+		assert.ok(got.endsWith(` · ${expected}`), JSON.stringify(output));
 	}
 });
 
 // ---------------------------------------------------------------- 8. 尾部提示行
 check("尾部上限/截断提示行不计入条目数", () => {
 	const cases: Array<[string, string, string]> = [
-		["ls", "a\nb\nc\n\n[500 entries limit reached. Use limit=1000 for more]", "ls . · 3 entries (163ms)"],
-		["find", "a.ts\nb.ts\n\n[200 results limit reached. Use limit=400 for more, or refine pattern]", "found 2 files (163ms)"],
-		["grep", "a.ts:1:x\nb.ts:2:y\n\n[Some lines truncated to 1000 chars. Use read tool to see full lines]", "grep 2 matches (163ms)"],
+		["ls", "a\nb\nc\n\n[500 entries limit reached. Use limit=1000 for more]", "3 entries"],
+		["find", "a.ts\nb.ts\n\n[200 results limit reached. Use limit=400 for more, or refine pattern]", "2 files"],
+		["grep", "a.ts:1:x\nb.ts:2:y\n\n[Some lines truncated to 1000 chars. Use read tool to see full lines]", "2 matches"],
 	];
 	for (const [name, output, expected] of cases) {
 		const r = renderers(name);
-		const got = dedent(text(r.renderResult({ content: [{ type: "text", text: output }] }, { expanded: false, isPartial: false }, theme, ctx())));
-		assert.equal(got, expected, `${name}: ${got}`);
+		const got = dedent(
+			text(r.renderResult({ content: [{ type: "text", text: output }] }, { expanded: false, isPartial: false }, theme, ctx())),
+		);
+		assert.ok(got.endsWith(` · ${expected}`), `${name}: ${got}`);
 	}
 });
 
 // ---------------------------------------------------------------- 9. 表外工具
 check("表外工具无上游渲染时套用折叠", () => {
 	const generic = renderers("weird-tool");
-	const running = ctx({ isPartial: true, durationMs: undefined, state: { startedAt: Date.now() - 1200 }, args: { script: "Get-Process" } });
+	const running = ctx({ isPartial: true, durationMs: undefined, args: { script: "Get-Process" } });
 	assert.equal(dedent(text(generic.renderCall({ script: "Get-Process" }, theme, running))), "weird-tool Get-Process");
-	assert.match(
-		dedent(text(generic.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running))),
-		/^weird-tool · running \(1\.[2-3]s\)$/,
-	);
-	const done = ctx({ args: { script: "Get-Process" }, durationMs: 1200 });
+	assert.equal(text(generic.renderResult({ content: [] }, { expanded: false, isPartial: true }, theme, running)), "");
+	const done = ctx({ args: { script: "Get-Process" } });
 	assert.equal(
 		dedent(text(generic.renderResult({ content: [{ type: "text", text: "p1\np2" }] }, { expanded: false, isPartial: false }, theme, done))),
-		"weird-tool · 2 lines (1.2s)",
+		"weird-tool Get-Process · 2 lines",
 	);
 });
 
@@ -287,12 +302,12 @@ check("上游没有渲染槽时仍用折叠", () => {
 	const generic = renderers("weird-tool", {});
 	assert.equal(
 		dedent(text(generic.renderResult({ content: [{ type: "text", text: "a\nb" }] }, { expanded: false, isPartial: false }, theme, ctx()))),
-		"weird-tool · 2 lines (163ms)",
+		"weird-tool · 2 lines",
 	);
 	// next() 返回 undefined 时同样退化到折叠。
 	assert.equal(
 		dedent(text(renderers("another-tool").renderResult({ content: [] }, { expanded: false, isPartial: false }, theme, ctx()))),
-		"another-tool · 0 lines (163ms)",
+		"another-tool · 0 lines",
 	);
 });
 
@@ -308,12 +323,12 @@ check("无上游渲染槽的图片结果由 Pi 独立渲染", () => {
 	const generic = renderers("image-tool");
 	assert.equal(
 		dedent(text(generic.renderResult({ content: [{ type: "image", data: "x", mimeType: "image/png" }] }, { expanded: false, isPartial: false }, theme, ctx()))),
-		"image-tool · 0 lines (163ms)",
+		"image-tool · 0 lines",
 	);
 });
 
 // ---------------------------------------------------------------- 11. read 图片
-check("read 读取图片时摘要显示 read image", () => {
+check("read 读取图片时摘要显示 image", () => {
 	const r = renderers("read");
 	assert.equal(
 		dedent(
@@ -326,7 +341,7 @@ check("read 读取图片时摘要显示 read image", () => {
 				),
 			),
 		),
-		"read image (163ms)",
+		"read a.png · image",
 	);
 	// 图片块与多行文本共存时仍按图片处理。
 	assert.equal(
@@ -340,12 +355,12 @@ check("read 读取图片时摘要显示 read image", () => {
 				),
 			),
 		),
-		"read image (163ms)",
+		"read a.png · image",
 	);
 });
 
 // ---------------------------------------------------------------- 12. Ctrl+O 一致性
-check("Ctrl+O 展开：各工具均显示命令行 + 内容", () => {
+check("Ctrl+O 展开：标题行 + 正文块", () => {
 	const argsByName: Record<string, any> = {
 		bash: { command: "cmd" },
 		read: { path: "a.ts" },
@@ -356,21 +371,23 @@ check("Ctrl+O 展开：各工具均显示命令行 + 内容", () => {
 	for (const [name, args] of Object.entries(argsByName)) {
 		const r = renderers(name);
 		const expanded = ctx({ expanded: true, args });
-		assert.equal(text(r.renderCall(args, theme, expanded)), "", `${name} 展开态 renderCall 应为空`);
-		const got = dedent(text(r.renderResult({ content: [{ type: "text", text: "x" }] }, { expanded: true, isPartial: false }, theme, expanded)));
-		assert.notEqual(got, "x", `${name} 展开块缺少命令行`);
+		const header = dedent(text(r.renderCall(args, theme, expanded)));
+		assert.ok(header.startsWith(name), `${name} 标题行应以工具名开头：${header}`);
+		const rows = dedent(text(r.renderResult({ content: [{ type: "text", text: "x" }] }, { expanded: true, isPartial: false }, theme, expanded))).split("\n");
+		assert.deepEqual(rows, ["x"], `${name} 展开块只应包含正文`);
 	}
 });
 
 // ---------------------------------------------------------------- 13. edit / write
-check("edit 展示 diff：统计 + 超过 30 行截断提示", () => {
+check("edit 展示 diff：块尾增删统计，超过 30 行截断", () => {
 	const edit = renderers("edit");
 	const diff = `-1 old\n+1 new\n${Array.from({ length: 40 }, (_, i) => `+${i + 2} line`).join("\n")}\n`;
+	const context = ctx({ args: { path: "C:/tmp/a.ts" } });
+	assert.equal(dedent(text(edit.renderCall(context.args, theme, context))), "edit C:/tmp/a.ts");
 	const out = dedent(
-		text(edit.renderResult({ content: [{ type: "text", text: "ok" }], details: { diff } }, { expanded: false, isPartial: false }, theme, ctx({ args: { path: "C:/tmp/a.ts" } }))),
+		text(edit.renderResult({ content: [{ type: "text", text: "ok" }], details: { diff } }, { expanded: false, isPartial: false }, theme, context)),
 	);
-	assert.ok(out.startsWith("edit C:/tmp/a.ts"), out);
-	assert.ok(out.includes("└ Added 41 lines, removed 1 line"), out);
+	assert.ok(out.includes("+41 −1"), out);
 	assert.ok(out.includes("more lines, ctrl+o to expand"), out);
 });
 
@@ -428,7 +445,7 @@ check("outputPad=0 时展开块不额外缩进", () => {
 		)
 		.render(40)
 		.map(stripTerminalSequences);
-	assert.ok(lines[0]!.startsWith("$ ls"), JSON.stringify(lines[0]));
+	assert.ok(lines[0]!.startsWith("x"), JSON.stringify(lines[0]));
 });
 
 check("diff 长行折行后单行仍不超宽", () => {
@@ -508,15 +525,15 @@ check("收起态单行折行有上限，末段以省略号收尾；展开后显�
 		);
 		return component.render(40).map((line: string) => line.replace(/\s+$/, ""));
 	};
-	const collapsed = rows(false).filter((line: string) => line.includes("w"));
+	const collapsed = rows(false).filter((line: string) => line.includes("wwww"));
 	assert.equal(collapsed.length, 20, `收起态单行应限在 20 行：${collapsed.length}`);
 	assert.ok(collapsed[19]!.endsWith("…"), JSON.stringify(collapsed[19]));
 	for (const line of collapsed) assert.ok(visibleWidth(line) <= 40, `${visibleWidth(line)}`);
-	const expanded = rows(true).filter((line: string) => line.includes("w"));
-	assert.ok(expanded.length > 20, `展开后应显示全文：${expanded.length}`);
-	assert.ok(!expanded.some((line: string) => line.endsWith("…")), "展开后不应再接截止标记");
+	const expandedRows = rows(true).filter((line: string) => line.includes("wwww"));
+	assert.ok(expandedRows.length > 20, `展开后应显示全文：${expandedRows.length}`);
+	assert.ok(!expandedRows.some((line: string) => line.endsWith("…")), "展开后不应再接截止标记");
 	assert.ok(
-		expanded.join("").replace(/\s+/g, "").includes(content.replace(/\s+/g, "")),
+		expandedRows.join("").replace(/\s+/g, "").includes(content.replace(/\s+/g, "")),
 		"展开后不得丢字符",
 	);
 });
@@ -601,17 +618,7 @@ check("shortenPath 只缩写完整的 home 前缀", () => {
 	const home = homedir().replace(/\\/g, "/").replace(/\/+$/, "");
 	const inside = `${home}/project/a.ts`;
 	const sibling = `${home}by/a.ts`;
-	const title = (path: string) =>
-		dedent(
-			text(
-				edit.renderResult(
-					{ content: [{ type: "text", text: "ok" }], details: { diff: "" } },
-					{ expanded: false, isPartial: false },
-					theme,
-					ctx({ args: { path } }),
-				),
-			),
-		);
+	const title = (path: string) => dedent(text(edit.renderCall({ path }, theme, ctx({ args: { path } }))));
 	assert.ok(title(inside).includes("~/project/a.ts"), title(inside));
 	assert.ok(title(sibling).includes(sibling), title(sibling));
 });
@@ -619,11 +626,12 @@ check("shortenPath 只缩写完整的 home 前缀", () => {
 check("write 展示写入预览：行数 + 超过 10 行截断提示", () => {
 	const write = renderers("write");
 	const content = Array.from({ length: 15 }, (_, i) => `line${i}`).join("\n");
+	const context = ctx({ args: { path: "C:/tmp/b.ts", content } });
+	assert.equal(dedent(text(write.renderCall(context.args, theme, context))), "write C:/tmp/b.ts");
 	const out = dedent(
-		text(write.renderResult({ content: [{ type: "text", text: "ok" }] }, { expanded: false, isPartial: false }, theme, ctx({ args: { path: "C:/tmp/b.ts", content } }))),
+		text(write.renderResult({ content: [{ type: "text", text: "ok" }] }, { expanded: false, isPartial: false }, theme, context)),
 	);
-	assert.ok(out.startsWith("write C:/tmp/b.ts"), out);
-	assert.ok(out.includes("└ Wrote 15 lines"), out);
+	assert.ok(out.includes("15 lines"), out);
 	assert.ok(out.includes("(5 more lines, ctrl+o to expand)"), out);
 });
 

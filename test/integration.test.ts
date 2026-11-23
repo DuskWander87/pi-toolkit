@@ -44,7 +44,12 @@ installMinimalTools({
 	},
 } as any);
 
-function toolRow(id: string, command: string): ToolExecutionComponent {
+/**
+ * 一条已完成并收起的 `bash` 工具行。
+ *
+ * `started: false` 复现 Pi 的历史回放路径：只补结果，不标记执行开始与参数齐全。
+ */
+function toolRow(id: string, command: string, options: { started?: boolean } = {}): ToolExecutionComponent {
 	const renderers = { renderShell: "self" as const, ...resolver!("bash", () => undefined) };
 	const row = new ToolExecutionComponent(
 		"bash",
@@ -55,8 +60,10 @@ function toolRow(id: string, command: string): ToolExecutionComponent {
 		{ requestRender() {} } as any,
 		process.cwd(),
 	);
-	row.markExecutionStarted();
-	row.setArgsComplete();
+	if (options.started ?? true) {
+		row.markExecutionStarted();
+		row.setArgsComplete();
+	}
 	row.updateResult({ content: [{ type: "text", text: "ok" }], details: {}, durationMs: 300 } as any, false);
 	return row;
 }
@@ -169,6 +176,12 @@ check("三扩展同时安装时用户、摘要与工具行左缘一致", () => {
 	assert.equal((joined.match(/❯/g) ?? []).length, 1, joined);
 });
 
+check("历史回放的工具行收起后只剩一行", () => {
+	const replayed = toolRow("replay-1", "npm test", { started: false });
+	const lines = bodyLines(plain(replayed.render(WIDTH))).map((line) => line.trim());
+	assert.deepEqual(lines, ["● bash npm test"], JSON.stringify(lines));
+});
+
 check("静默轮次的思考正文只在展开后出现", () => {
 	const chat = new Container();
 	chat.addChild(assistantRow("折叠里的思考"));
@@ -199,7 +212,7 @@ check("正文与摘要行按发生顺序排列，正文之前的思考由摘要�
 
 	const lines = plain(chat.render(WIDTH));
 	const collapsed = lines.join("\n");
-	const summaryY = lines.findIndex((line) => line.includes("Thought for 3s, ran 2 shell commands"));
+	const summaryY = lines.findIndex((line) => line.includes("Thought for 3s, ran 2 bash commands"));
 	assert.ok(collapsed.includes("先看看当前的失败用例。"), collapsed);
 	assert.ok(summaryY > 0, collapsed);
 	// 正文之前的思考已计入摘要行，不再展开；收尾回复在摘要之外，按 Pi 的设置显示。

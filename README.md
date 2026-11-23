@@ -12,7 +12,7 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 
 ![工具调用收起后只剩一行摘要](assets/hero-collapsed.png)
 
-上面这一屏是三个渲染类扩展叠加的结果：`minimal-tools`、`message-marks`、`tool-run-groups`。
+上面这一屏是 `minimal-tools`、`message-marks`、`tool-run-groups` 三个渲染类扩展叠加的结果；`run-clock` 再把整段请求的耗时、生成 token 数与当前这块思考的用时显示在输入框上方，同时关掉 working 行，不占对话行。
 
 <details>
 <summary>展开后的时间线</summary>
@@ -29,9 +29,10 @@ Pi coding agent 的扩展集合，按改动位置分两类：渲染类只改对�
 
 | 扩展 | 作用 |
 |---|---|
-| [minimal-tools](extensions/render/minimal-tools/README.md) | 工具调用的显示：执行中可见，结束后收成一行 |
+| [minimal-tools](extensions/render/minimal-tools/README.md) | 工具行的显示：调用行带参数，结束后收成一行 |
 | [message-marks](extensions/render/message-marks/README.md) | 用户、助手与工具共用的 2 列标记栏 |
 | [tool-run-groups](extensions/render/tool-run-groups/README.md) | 工具调用折叠成一行摘要，回复正文之后另起一行摘要 |
+| [run-clock](extensions/render/run-clock/README.md) | 整段请求的耗时、token 数与思考用时显示在输入框上方，请求期间关掉 Pi 的 working 行 |
 
 ### agent 类
 

@@ -12,7 +12,7 @@ Version and dependency scope: see [Compatibility](#compatibility).
 
 ![Tool calls collapsed into a single summary line](assets/hero-collapsed.png)
 
-This screen layers three rendering extensions: `minimal-tools`, `message-marks`, and `tool-run-groups`.
+This screen layers three rendering extensions: `minimal-tools`, `message-marks`, and `tool-run-groups`. `run-clock` shows the request's elapsed time, generated tokens, and the current thinking block above the editor and hides Pi's working line while the request runs.
 
 <details>
 <summary>Expanded timeline</summary>
@@ -29,9 +29,10 @@ This screen layers three rendering extensions: `minimal-tools`, `message-marks`,
 
 | Extension | What it does |
 |---|---|
-| [minimal-tools](extensions/render/minimal-tools/README.md) | How tool calls are displayed: visible while running, one line when done |
+| [minimal-tools](extensions/render/minimal-tools/README.md) | Tool rows: the call line carries its arguments, one line when done |
 | [message-marks](extensions/render/message-marks/README.md) | A 2-column gutter shared by user, assistant, and tools |
 | [tool-run-groups](extensions/render/tool-run-groups/README.md) | Collapses tool calls into one summary line, restarting after a reply |
+| [run-clock](extensions/render/run-clock/README.md) | Shows the request's elapsed time, token count, and thinking block above the editor and hides Pi's working line while it runs |
 
 ### Agent behavior
 

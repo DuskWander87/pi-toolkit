@@ -1,7 +1,7 @@
 /**
  * tool-run-groups
  *
- * 两级聚合，把工具调用收成摘要行（Claude Code 风格）。
+ * 两级聚合，把工具调用收成摘要行。
  *
  * 第一级——单轮工具行 `ToolRunGroup`：同一轮助手回复里连续且都已结束的工具行收成
  * 一行，`edit` / `write` 不参与，单条调用留给区间摘要行。
@@ -15,8 +15,8 @@
  * 的回复都只留正文；展开后显示思考正文，Pi 的 `hideThinkingBlock` 为 `true` 时这些
  * 轮次不显示任何思考内容（耗时只在摘要行上）。
  *
- * 收起：`Thought for 28s, ran 8 shell commands`；执行中的工具行不折叠，留在摘要
- * 下方，保留命令行、流式输出与实时计时，`tool_execution_end` 后并入同一行。
+ * 收起：`Thought for 28s, ran 8 bash commands`；执行中的工具行不折叠，留在摘要
+ * 下方，保留调用行；`tool_execution_end` 后并入同一行摘要。
  * 有失败时只把计数片段标红（`· 1 failed`），摘要正文保持 dim——一两个调用失败
  * 不代表整段都失败。展开（Ctrl+O 或点击摘要行）显示每个调用各自的完整内容。
  * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
@@ -54,8 +54,6 @@ const GUTTER = 2;
 const SOLO_TOOLS = new Set(["edit", "write"]);
 /** 第一级至少两个连续工具行才收紧；单条调用由第二级摘要行折叠。 */
 const MIN_RUN = 2;
-/** 内置工具名到展示名的映射，与 minimal-tools 保持一致。 */
-const TOOL_LABELS: Record<string, string> = { bash: "shell" };
 
 /** `session_start` 取得的主题代理：切换主题后仍然跟随。 */
 let activeTheme: Theme | undefined;
@@ -98,22 +96,20 @@ export interface ToolRunGroupOptions {
 	requestRender: () => void;
 }
 
-/** 把工具名序列汇总成 `2 shell commands, 1 read call`。 */
+/** 把工具名序列汇总成 `2 bash commands, 1 read call`。 */
 export function summarize(toolNames: readonly string[]): string {
 	const order: string[] = [];
 	const counts = new Map<string, number>();
 	for (const name of toolNames) {
-		const label = TOOL_LABELS[name] ?? name;
-		if (!counts.has(label)) order.push(label);
-		counts.set(label, (counts.get(label) ?? 0) + 1);
+		if (!counts.has(name)) order.push(name);
+		counts.set(name, (counts.get(name) ?? 0) + 1);
 	}
 	return order
-		.map((label) => {
-			const count = counts.get(label)!;
+		.map((name) => {
+			const count = counts.get(name)!;
 			const plural = count > 1 ? "s" : "";
-			return label === "shell"
-				? `${count} shell command${plural}`
-				: `${count} ${label} call${plural}`;
+			// bash 跑的是命令，量词用 command；其余工具用 call。
+			return name === "bash" ? `${count} bash command${plural}` : `${count} ${name} call${plural}`;
 		})
 		.join(", ");
 }
@@ -128,7 +124,7 @@ function seconds(thoughtMs: number): number {
 	return Math.max(1, Math.round(thoughtMs / 1000));
 }
 
-/** 收起态的完整摘要：`Thought for 2s, ran 3 shell commands`。 */
+/** 收起态的完整摘要：`Thought for 2s, ran 3 bash commands`。 */
 export function describeRun(toolNames: readonly string[], thoughtMs?: number): string {
 	const thought = thoughtMs === undefined ? "" : `Thought for ${seconds(thoughtMs)}s, `;
 	return `${thought}ran ${summarize(toolNames)}`;

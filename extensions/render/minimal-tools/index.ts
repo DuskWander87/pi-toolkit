@@ -1,9 +1,9 @@
 /**
  * minimal-tools
  *
- * 工具调用两阶段显示：
- * - 执行中：显示完整命令与运行耗时
- * - 结束后：折叠为一行摘要；edit / write 直接展示改动内容
+ * 工具调用的显示：
+ * - 执行中：只有调用行（`bash npm test`）
+ * - 结束后：收成一行 `调用行 · 量化`；edit / write 直接展示改动内容
  *
  * 展开（Ctrl+O）或出错时显示完整内容。
  */
@@ -36,15 +36,6 @@ const WRITE_PREVIEW_MAX_LINES = 10;
 const WRAP_MAX_ROWS = 20;
 /** 折行时留给内容的最小列宽，保证一个宽字符能完整落在行内。 */
 const WRAP_MIN_CONTENT_WIDTH = 2;
-/** 运行中计时的重绘间隔，与 Pi 内置工具计时一致。 */
-const TIMER_REFRESH_MS = 1000;
-
-/** 保存在 `context.state` 中的计时状态，renderCall 与 renderResult 共享。 */
-interface ToolTimerState {
-	startedAt?: number;
-	interval?: ReturnType<typeof setInterval>;
-}
-
 /** diff 行与变化片段的底色，随主题明暗切换。 */
 interface DiffPalette {
 	removed: Color;
@@ -102,12 +93,6 @@ function stringArg(args: unknown, key: string): string {
 function numberArg(args: unknown, key: string): number | undefined {
 	const value = (args as Record<string, unknown> | undefined)?.[key];
 	return typeof value === "number" ? value : undefined;
-}
-
-function formatDuration(ms: number | undefined): string {
-	if (ms === undefined) return "";
-	if (ms < 1000) return `${ms}ms`;
-	return `${(ms / 1000).toFixed(1)}s`;
 }
 
 /** 去掉终端控制序列与回车，统计与展示都基于清洗后的文本。 */
@@ -500,14 +485,22 @@ class DiffLines implements Component {
 	}
 }
 
-/** 标题行：工具名 + 路径。 */
-function titleLine(theme: RenderTheme, name: string, path: string): string {
-	return `${theme.fg("toolTitle", theme.bold(name))} ${theme.fg("accent", path || "...")}`;
+/** 标题行：工具名 + 参数；工具名取注册名，不另起别名。 */
+function toolHeader(theme: RenderTheme, name: string, detail: string, suffix = ""): string {
+	const head = theme.fg("toolTitle", theme.bold(name));
+	const body = detail ? ` ${theme.fg("accent", detail)}` : "";
+	return `${head}${body}${suffix}`;
 }
 
-/** 统计行：`  └ Added 2 lines, removed 1 line`。 */
+/** 收起态的那一行：`标题 · 量化`，没有量化时只留标题。 */
+function summaryLine(theme: RenderTheme, header: string, extra: string, pad: number): Text {
+	const tail = extra ? theme.fg("dim", ` · ${extra}`) : "";
+	return new Text(`${header}${tail}`, pad, 0);
+}
+
+/** 块尾统计行：`+2 −1` / `12 lines`，用 dim 与正文区分。 */
 function statLine(theme: RenderTheme, text: string): Text {
-	return new Text(theme.fg("muted", `  └ ${text}`), 0, 0);
+	return new Text(theme.fg("dim", text), 0, 0);
 }
 
 /** 截断提示行，展开快捷键跟随 Pi 的 keybinding 配置。 */
@@ -516,56 +509,47 @@ function moreLinesLine(theme: RenderTheme, remaining: number, context: RenderCon
 	return new Text(theme.fg("muted", `... (${remaining} more lines, ${hint})`), 0, 0);
 }
 
-/** 摘要行：描述 + 耗时，前缀与图标等宽的空白。 */
-function summaryLine(
-	context: RenderContext,
-	theme: RenderTheme,
-	description: string,
-): Text {
-	const ok = !context.isError;
-	const duration = formatDuration(context.durationMs);
-	const tail = duration ? theme.fg("muted", ` (${duration})`) : "";
-	const body = ok
-		? theme.fg("toolOutput", description)
-		: theme.fg("error", description);
-	const prefix = ok ? " " : `${theme.fg("error", "✗")} `;
-	return new Text(`${prefix}${body}${tail}`, context.outputPad, 0);
-}
-
-/** 运行中占位，前缀与思考块标签对齐；有起点时附带已用时间。 */
-function runningLine(theme: RenderTheme, label: string, pad: number, elapsed: string): Text {
-	const suffix = elapsed ? ` (${elapsed})` : "";
-	return new Text(theme.fg("muted", ` ${label} · running${suffix}`), pad, 0);
-}
-
-/** 执行开始时记下计时起点，只记录一次。 */
-function startTimer(context: RenderContext): void {
-	const state = context.state as ToolTimerState | undefined;
-	if (!state) return;
-	if (context.executionStarted && state.startedAt === undefined) {
-		state.startedAt = Date.now();
-	}
-}
-
 /**
- * 同步计时状态并返回运行中已用时间。
- * 运行中按秒触发重绘，结束时停止计时，避免后台残留 interval。
+ * 调用行是否显示：运行中、出错、展开时显示，成功收起后由结果行代替标题。
+ *
+ * 「参数已齐、还没开始执行」是实时流程的过渡帧（`message_end` 调用 `setArgsComplete`，
+ * `tool_execution_start` 才 `markExecutionStarted`），此时调用行必须在。Pi 的历史回放路径
+ * 两个标记都不设，`executionStarted` 与 `argsComplete` 同为 `false`；回放行已有结果，
+ * 标题由结果行给出，不能再显示调用行。
  */
-function syncTimer(context: RenderContext, isPartial: boolean): string {
-	const state = context.state as ToolTimerState | undefined;
-	if (!state) return "";
-	if (!isPartial) {
-		if (state.interval !== undefined) {
-			clearInterval(state.interval);
-			state.interval = undefined;
+function callVisible(context: RenderContext): boolean {
+	if (context.isPartial) return true;
+	if (!context.executionStarted && context.argsComplete) return true;
+	return context.isError || context.expanded === true;
+}
+
+/** 标题行文案：工具名 + 参数。`renderCall` 与收起态的摘要行共用。 */
+function headerOf(name: string, args: unknown, theme: RenderTheme): string {
+	switch (name) {
+		case "bash":
+			return toolHeader(theme, "bash", oneLine(stringArg(args, "command")) || "...");
+		case "read": {
+			const range = formatReadLineRange(numberArg(args, "offset"), numberArg(args, "limit"));
+			return toolHeader(theme, "read", shortenPath(stringArg(args, "path")) || "...", range ? theme.fg("warning", range) : "");
 		}
-		return "";
+		case "grep":
+			return toolHeader(theme, "grep", `/${oneLine(stringArg(args, "pattern"), 40)}/`);
+		case "find":
+			return toolHeader(theme, "find", oneLine(stringArg(args, "pattern"), 40));
+		case "ls":
+			return toolHeader(theme, "ls", shortenPath(stringArg(args, "path") || "."));
+		case "write":
+		case "edit":
+			return toolHeader(theme, name, shortenPath(stringArg(args, "path")) || "...");
+		default:
+			return toolHeader(theme, name, argsSummary(args));
 	}
-	startTimer(context);
-	if (state.startedAt !== undefined && state.interval === undefined) {
-		state.interval = setInterval(() => context.invalidate(), TIMER_REFRESH_MS);
-	}
-	return state.startedAt === undefined ? "" : formatDuration(Date.now() - state.startedAt);
+}
+
+/** 文本类工具的调用行：成功收起后让位给结果行。 */
+function callLine(name: string, args: unknown, theme: RenderTheme, context: RenderContext): Text {
+	if (!callVisible(context)) return new Text("", context.outputPad, 0);
+	return new Text(headerOf(name, args, theme), context.outputPad, 0);
 }
 
 /**
@@ -576,16 +560,12 @@ function blockBox(theme: RenderTheme, pad: number): Box {
 }
 
 function expandedBlock(
-	header: string | undefined,
 	body: string,
 	theme: RenderTheme,
 	isError: boolean,
 	pad: number,
 ): Box {
 	const box = blockBox(theme, pad);
-	if (header) {
-		box.addChild(new Text(theme.fg("toolTitle", header), 0, 0));
-	}
 	const lines = collapseBlankLines(body.split("\n"));
 	if (lines.length > 0) {
 		const style = isError
@@ -597,48 +577,29 @@ function expandedBlock(
 }
 
 /**
- * 调用行：仅在执行中与出错时显示，成功结束且收起时由摘要行代替。
- * 每次渲染调用行都会经过这里，因此顺带记录计时起点。
- */
-function prepareCall(context: RenderContext): boolean {
-	startTimer(context);
-	if (context.isPartial || !context.executionStarted) return true;
-	return context.isError;
-}
-
-/**
- * 文本类工具（bash / read / grep / find / ls）的结果渲染策略。
+ * 文本类工具（bash / read / grep / find / ls）的结果渲染。
  *
- * 收起：摘要行，前缀为空白。
- * 展开或出错：带背景的整块区域。
+ * 收起且成功：一行 `调用行 · 量化`，标题在这一行里补回（`renderCall` 已让位）。
+ * 运行中：不占行——“还在跑”由调用行与 `run-clock` 的计时行表达。
+ * 展开或出错：正文进背景块，调用行留在块外。
  */
-function renderResultText(
+function renderToolResult(
 	result: { content: Array<{ type: string; text?: string }> },
 	options: ToolRenderResultOptions,
 	theme: RenderTheme,
 	context: RenderContext,
+	header: string,
 	describe: (output: string) => string,
-	runningLabel: string,
-	callHeader: string,
 ): Text | Box {
 	const output = firstText(result);
-
-	if (options.isPartial) {
-		return runningLine(theme, runningLabel, context.outputPad, syncTimer(context, true));
-	}
-	syncTimer(context, false);
-	if (context.isError) {
-		// 出错时 renderCall 已保留命令行，这里不再重复。
-		return expandedBlock(undefined, output, theme, true, context.outputPad);
-	}
-	if (options.expanded) {
-		return expandedBlock(callHeader, output, theme, false, context.outputPad);
-	}
-	return summaryLine(context, theme, describe(output));
+	if (context.isError) return expandedBlock(output, theme, true, context.outputPad);
+	if (options.expanded) return expandedBlock(output, theme, false, context.outputPad);
+	if (options.isPartial) return new Text("", context.outputPad, 0);
+	return summaryLine(theme, header, describe(output), context.outputPad);
 }
 
 /**
- * edit 结果渲染：标题 + 增删统计 + diff 正文。
+ * edit 结果渲染：diff 正文 + 块尾增删统计。
  * diff 已在 Pi 的工具结果中算好，这里只负责配色与换行。
  */
 function renderEditResult(
@@ -647,29 +608,17 @@ function renderEditResult(
 	theme: RenderTheme,
 	context: RenderContext,
 ): Text | Box {
-	if (options.isPartial) {
-		return runningLine(theme, "edit", context.outputPad, syncTimer(context, true));
-	}
-	syncTimer(context, false);
-	if (context.isError) {
-		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
-	}
+	if (options.isPartial) return new Text("", context.outputPad, 0);
+	if (context.isError) return expandedBlock(firstText(result), theme, true, context.outputPad);
 
-	const path = shortenPath(stringArg(context.args, "path"));
 	const diff = result.details?.diff ?? "";
 	const box = blockBox(theme, context.outputPad);
-	box.addChild(new Text(titleLine(theme, "edit", path), 0, 0));
-
 	if (diff.trim() === "") {
-		box.addChild(statLine(theme, "No changes"));
+		box.addChild(statLine(theme, "no changes"));
 		return box;
 	}
 
 	const stats = diffStats(diff);
-	box.addChild(
-		statLine(theme, `Added ${plural(stats.added, "line")}, removed ${plural(stats.removed, "line")}`),
-	);
-
 	const lines = trimTrailingEmpty(diff.split("\n"));
 	const limit = options.expanded ? lines.length : EDIT_DIFF_MAX_LINES;
 	const shown = lines.slice(0, limit);
@@ -677,11 +626,12 @@ function renderEditResult(
 	if (shown.length < lines.length) {
 		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));
 	}
+	box.addChild(statLine(theme, `+${stats.added} −${stats.removed}`));
 	return box;
 }
 
 /**
- * write 结果渲染：标题 + 写入行数 + 内容预览。
+ * write 结果渲染：写入内容预览 + 块尾行数。
  * write 无 diff 详情，行数与预览均从 args.content 推导。
  */
 function renderWriteResult(
@@ -690,30 +640,20 @@ function renderWriteResult(
 	theme: RenderTheme,
 	context: RenderContext,
 ): Text | Box {
-	if (options.isPartial) {
-		return runningLine(theme, "write", context.outputPad, syncTimer(context, true));
-	}
-	syncTimer(context, false);
-	if (context.isError) {
-		return expandedBlock(undefined, firstText(result), theme, true, context.outputPad);
-	}
+	if (options.isPartial) return new Text("", context.outputPad, 0);
+	if (context.isError) return expandedBlock(firstText(result), theme, true, context.outputPad);
 
-	const path = shortenPath(stringArg(context.args, "path"));
-	const content = stringArg(context.args, "content");
-	const lines = trimTrailingEmpty(content.split("\n"));
-
+	const lines = trimTrailingEmpty(stringArg(context.args, "content").split("\n"));
 	const box = blockBox(theme, context.outputPad);
-	box.addChild(new Text(titleLine(theme, "write", path), 0, 0));
-	box.addChild(statLine(theme, `Wrote ${plural(lines.length, "line")}`));
-
 	const limit = options.expanded ? lines.length : WRITE_PREVIEW_MAX_LINES;
-	const shown = lines.slice(0, limit).map((content): DiffLine => ({ kind: "add", prefix: "+ ", content }));
+	const shown = lines.slice(0, limit).map((text): DiffLine => ({ kind: "add", prefix: "+ ", content: text }));
 	if (shown.length > 0) {
 		box.addChild(new DiffLines(shown, theme, options.expanded ? undefined : WRAP_MAX_ROWS));
 	}
 	if (shown.length < lines.length) {
 		box.addChild(moreLinesLine(theme, lines.length - shown.length, context));
 	}
+	box.addChild(statLine(theme, plural(lines.length, "line")));
 	return box;
 }
 
@@ -734,31 +674,18 @@ function argsSummary(args: unknown): string {
 }
 
 /**
- * 表外工具的兜底渲染：与内置工具同一套两阶段策略。
- * 新增工具无需改动本扩展即可获得折叠显示。
+ * 表外工具的兜底渲染：与内置工具同一套渲染策略。
+ * 新增工具无需改动本扩展即可获得调用行、收起态摘要行与展开块。
  */
 function genericRenderers(toolName: string): ToolRenderers {
 	return {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const title = theme.fg("toolTitle", theme.bold(toolName));
-			const summary = argsSummary(args);
-			const detail = summary ? ` ${theme.fg("accent", summary)}` : "";
-			return new Text(`${title}${detail}`, context.outputPad, 0);
+			return callLine(toolName, args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			const summary = argsSummary(context.args);
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				(output) => `${toolName} · ${plural(countEntries(output), "line")}`,
-				toolName,
-				summary ? `${toolName} ${summary}` : toolName,
+			return renderToolResult(result, options, theme, context, headerOf(toolName, context.args, theme), (output) =>
+				plural(countEntries(output), "line"),
 			);
 		},
 	};
@@ -774,26 +701,11 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	bash: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			const command = stringArg(args, "command");
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const line = oneLine(command) || "...";
-			const title = context.isError
-				? theme.fg("muted", `$ ${line}`)
-				: theme.fg("toolTitle", theme.bold(`$ ${line}`));
-			return new Text(title, context.outputPad, 0);
+			return callLine("bash", args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				() => "shell",
-				"shell",
-				`$ ${oneLine(stringArg(context.args, "command")) || "..."}`,
-			);
+			// bash 没有比命令本身更有用的量化字段，收起态只留调用行。
+			return renderToolResult(result, options, theme, context, headerOf("bash", context.args, theme), () => "");
 		},
 	},
 
@@ -801,28 +713,12 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	read: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const path = shortenPath(stringArg(args, "path"));
-			const range = formatReadLineRange(numberArg(args, "offset"), numberArg(args, "limit"));
-			const suffix = range ? theme.fg("warning", range) : "";
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", path || "...")}${suffix}`,
-				context.outputPad,
-				0,
-			);
+			return callLine("read", args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
 			const hasImage = result.content.some((part) => part.type === "image");
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				(output) => (hasImage ? "read image" : `read ${plural(countReadLines(output), "line")}`),
-				"read",
-				`read ${shortenPath(stringArg(context.args, "path"))}${formatReadLineRange(numberArg(context.args, "offset"), numberArg(context.args, "limit")) ?? ""}`,
+			return renderToolResult(result, options, theme, context, headerOf("read", context.args, theme), (output) =>
+				hasImage ? "image" : plural(countReadLines(output), "line"),
 			);
 		},
 	},
@@ -830,16 +726,9 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	// ---------------------------------------------------------------- write
 	write: {
 		renderShell: "self",
+		// 写入内容逐条可见，不受聚合影响：标题行始终留在块外。
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const path = shortenPath(stringArg(args, "path"));
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", path || "...")}`,
-				context.outputPad,
-				0,
-			);
+			return new Text(headerOf("write", args, theme), context.outputPad, 0);
 		},
 		renderResult(result, options, theme, context) {
 			return renderWriteResult(result, options, theme, context);
@@ -849,16 +738,9 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	// ---------------------------------------------------------------- edit
 	edit: {
 		renderShell: "self",
+		// 改动永远看得到：标题行始终留在 diff 块外。
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const path = shortenPath(stringArg(args, "path"));
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", path || "...")}`,
-				context.outputPad,
-				0,
-			);
+			return new Text(headerOf("edit", args, theme), context.outputPad, 0);
 		},
 		renderResult(result, options, theme, context) {
 			return renderEditResult(result, options, theme, context);
@@ -869,25 +751,11 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	grep: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const pattern = stringArg(args, "pattern");
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("grep"))} ${theme.fg("accent", `/${oneLine(pattern, 40)}/`)}`,
-				context.outputPad,
-				0,
-			);
+			return callLine("grep", args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				(output) => `grep ${plural(countEntries(output), "match", "matches")}`,
-				"grep",
-				`grep /${oneLine(stringArg(context.args, "pattern"), 40)}/`,
+			return renderToolResult(result, options, theme, context, headerOf("grep", context.args, theme), (output) =>
+				plural(countEntries(output), "match", "matches"),
 			);
 		},
 	},
@@ -896,25 +764,11 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	find: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const pattern = stringArg(args, "pattern");
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("find"))} ${theme.fg("accent", oneLine(pattern, 40))}`,
-				context.outputPad,
-				0,
-			);
+			return callLine("find", args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				(output) => `found ${plural(countEntries(output), "file")}`,
-				"find",
-				`find ${oneLine(stringArg(context.args, "pattern"), 40)}`,
+			return renderToolResult(result, options, theme, context, headerOf("find", context.args, theme), (output) =>
+				plural(countEntries(output), "file"),
 			);
 		},
 	},
@@ -923,26 +777,11 @@ const CUSTOM_RENDERERS: Record<string, ToolRenderers> = {
 	ls: {
 		renderShell: "self",
 		renderCall(args, theme, context) {
-			if (!prepareCall(context)) {
-				return new Text("", context.outputPad, 0);
-			}
-			const path = shortenPath(stringArg(args, "path") || ".");
-			return new Text(
-				`${theme.fg("toolTitle", theme.bold("ls"))} ${theme.fg("accent", path || ".")}`,
-				context.outputPad,
-				0,
-			);
+			return callLine("ls", args, theme, context);
 		},
 		renderResult(result, options, theme, context) {
-			const path = shortenPath(stringArg(context.args, "path") || ".");
-			return renderResultText(
-				result,
-				options,
-				theme,
-				context,
-				(output) => `ls ${path} · ${plural(countEntries(output), "entry", "entries")}`,
-				"ls",
-				`ls ${path}`,
+			return renderToolResult(result, options, theme, context, headerOf("ls", context.args, theme), (output) =>
+				plural(countEntries(output), "entry", "entries"),
 			);
 		},
 	},
@@ -974,10 +813,8 @@ function withPad(component: Component, pad: number): Box {
 }
 
 /**
- * 展开且成功的结束态：调用行并进结果块。
- *
- * 与 `expandedBlock` 的单块形态一致——`bash` 展开时命令行就在背景块内。
- * 运行中与出错时仍保留分开的两段，同样对齐 `prepareCall` 的取舍。
+ * 搜索类工具展开且成功时：上游调用行并进结果块，避免与块内内容重复。
+ * 运行中与出错时保留分开的两段，调用行仍由上游渲染。
  */
 function mergesIntoResultBlock(expanded: boolean, isPartial: boolean, isError: boolean): boolean {
 	return expanded && !isPartial && !isError;
