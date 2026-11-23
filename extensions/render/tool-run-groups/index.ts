@@ -11,9 +11,10 @@
  * 不并入上面那一行；被中断或报错的轮次同样是硬边界。`edit` / `write` 行参与区间，
  * 但摘要行不统计它们，收起时仍逐条渲染——改动永远看得到。
  *
- * 收起时思考正文不占行：摘要行已经统计过耗时，区间内的静默轮次与区间前那条带正文
- * 的回复都只留正文；展开后显示思考正文，Pi 的 `hideThinkingBlock` 为 `true` 时这些
- * 轮次不显示任何思考内容（耗时只在摘要行上）。
+ * 收起时思考正文不占行：摘要行已经统计过耗时，区间内的静默轮次、区间前那条带正文
+ * 的回复、区间之后那条收尾回复都只留正文；收尾回复没有工具调用，耗时同样并进上方
+ * 那行摘要，所以收起态不会在摘要下面多留一行 `Thought for Ns`。展开后显示思考正文，
+ * Pi 的 `hideThinkingBlock` 为 `true` 时这些轮次不显示任何思考内容（耗时只在摘要行上）。
  *
  * 收起：`Thought for 28s, ran 8 bash commands`；执行中的工具行不折叠，留在摘要
  * 下方，保留调用行；`tool_execution_end` 后并入同一行摘要。
@@ -180,6 +181,17 @@ function clearAbsorbedThoughtLabels(items: readonly Component[]): void {
 }
 
 /**
+ * 耗时已并进上方摘要的收尾回复。重扫时摘要行按这个标记重新认领：
+ * 只有标记过的回复交出耗时，标签还在的回复归自己。
+ */
+const absorbedReplies = new WeakSet<Component>();
+
+/** 摘要行认领自己下方那条收尾回复；没标记过的回复仍保留自己的耗时标签。 */
+function claimTrailingThought(summary: ToolRunSummary, trailing: Component | undefined): void {
+	summary.setTrailingThought(trailing && absorbedReplies.has(trailing) ? trailing : undefined);
+}
+
+/**
  * 该助手消息是否是一个「静默轮次」：没有任何可见文本，只思考并调工具。
  *
  * 中断、报错与截断的轮次自带提示文本，不能折叠。内部结构不可用时同样返回
@@ -343,8 +355,9 @@ export interface ToolRunSummaryOptions {
  * 一段工具调用的摘要行 + 折叠内的时间线。
  *
  * 带可见文本的助手消息是区间边界：正文在摘要行之前渲染，不进入折叠。
- * 收起时思考正文一并隐去，展开后回到 Pi 的设置；区间前那条回复的思考同样收在
- * 摘要行里。`edit` / `write` 行参与区间但不被摘要行代表：摘要收起时它们仍逐条渲染。
+ * 收起时思考正文一并隐去，展开后回到 Pi 的设置；区间前那条回复与区间之后那条收尾
+ * 回复的思考同样收在摘要行里。`edit` / `write` 行参与区间但不被摘要行代表：摘要
+ * 收起时它们仍逐条渲染。
  * 摘要内容每次渲染时从子组件重新累计，因此执行中/失败/主题切换都会即时反映；
  * 工具名与耗时随折叠区间增长而变化，不需要重建组件。
  */
@@ -357,6 +370,8 @@ export class ToolRunSummary extends Container {
 	private readonly itemOrder: readonly Component[];
 	private expandedState: boolean;
 	private piHidden: boolean;
+	/** 区间之后那条收尾回复：它渲染在摘要下方，耗时同样算进这一行。 */
+	private trailingThought: Component | undefined;
 	/** 收起态下改动行的位置，点击要落到行上而不是整块折起摘要。 */
 	private soloLayout: Array<{ child: Component; start: number; height: number }> = [];
 
@@ -399,14 +414,23 @@ export class ToolRunSummary extends Container {
 		this.syncThinkingVisibility();
 	}
 
+	/** 收尾回复的耗时并入这一行：它的标签已经清空，摘要行是这段思考唯一的出处。 */
+	setTrailingThought(assistant: Component | undefined): void {
+		if (this.trailingThought === assistant) return;
+		this.trailingThought = assistant;
+		this.syncThinkingVisibility();
+		this.invalidate();
+	}
+
 	/**
 	 * 收起时思考由摘要行代表；展开后按 Pi 的设置显示。
-	 * `extraThought` 在摘要之外渲染，思考可见性同样归这里管。
+	 * `extraThought` 与 `trailingThought` 在摘要之外渲染，思考可见性同样归这里管。
 	 */
 	private syncThinkingVisibility(): void {
 		const hidden = !this.expandedState || this.piHidden;
 		for (const child of this.children) setThinkingHidden(child, hidden);
 		setThinkingHidden(this.extraThought, hidden);
+		setThinkingHidden(this.trailingThought, hidden);
 	}
 
 	render(width: number): readonly string[] {
@@ -475,6 +499,7 @@ export class ToolRunSummary extends Container {
 			}
 		}
 		if (this.extraThought) thoughtMs += this.thoughtMsFor(this.extraThought) ?? 0;
+		if (this.trailingThought) thoughtMs += this.thoughtMsFor(this.trailingThought) ?? 0;
 		const text = describeRun(names, thoughtMs > 0 ? thoughtMs : undefined);
 		return styledSummaryLine(text, failed, width, this.themeSource());
 	}
@@ -627,23 +652,25 @@ export function groupSilentTurns(
 		const thoughtMs = extraThought ? thoughtFor(extraThought) : undefined;
 		// 区间与吸收内容都没变才复用：执行中的行刚结束时要把它纳入摘要。
 		const piHidden = mode.hideThinkingBlock === true;
+		let summary: ToolRunSummary;
 		if (reused && sameItems(reused.sequence, region.items) && sameItems(reused.children, absorbed)) {
 			reused.setPiThinkingHidden(piHidden);
-			next.push(reused);
+			summary = reused;
 		} else {
-			next.push(
-				new ToolRunSummary({
-					items: absorbed,
-					sequence: region.items,
-					expanded: reused?.expanded ?? mode.toolOutputExpanded === true,
-					theme: () => activeTheme,
-					requestRender: () => mode.ui?.requestRender?.(),
-					thoughtMsFor: options.thoughtMsFor,
-					extraThought,
-					piHidden,
-				}),
-			);
+			summary = new ToolRunSummary({
+				items: absorbed,
+				sequence: region.items,
+				expanded: reused?.expanded ?? mode.toolOutputExpanded === true,
+				theme: () => activeTheme,
+				requestRender: () => mode.ui?.requestRender?.(),
+				thoughtMsFor: options.thoughtMsFor,
+				extraThought,
+				piHidden,
+			});
 		}
+		// 收尾回复没有工具调用，耗时并进这一行：摘要行是它思考的唯一出处。
+		claimTrailingThought(summary, flat[region.end]);
+		next.push(summary);
 		// 耗时已在摘要行里，收起与展开都不再重复区间内轮次与前置回复各自的标签。
 		clearAbsorbedThoughtLabels(absorbed);
 		if (extraThought) clearThoughtLabel(extraThought);
@@ -746,7 +773,35 @@ export function finishMessage(mode: GroupableMode, event: unknown): void {
 	// 静默轮次的耗时一结束就计入所在摘要；带正文的回复是边界，重扫让它留在区间外。
 	groupToolRuns(mode);
 	groupSilentTurns(mode);
+	absorbReplyThought(mode, assistant, message);
 	mode.ui?.requestRender?.();
+}
+
+/**
+ * 收尾回复没有工具调用：把它的耗时并进上方那行摘要，收起态不再在摘要下面多留一
+ * 行 `Thought for Ns`。上方没有摘要时保留标签——那是这一轮唯一的思考痕迹。
+ *
+ * 只认正常结束的回复；提示行（cache miss 之类）会接在回复后面，不影响归还耗时。
+ */
+function absorbReplyThought(
+	mode: GroupableMode,
+	assistant: Component | undefined,
+	message: { stopReason?: string; content?: Array<{ type?: string }> },
+): void {
+	if (!assistant || message.stopReason !== "stop") return;
+	// Pi 把带工具调用的消息归一成 `stopReason: "toolUse"`；provider 归一化有缺口时
+	// 仍按内容判一次，那段耗时归下面那行摘要。
+	if ((message.content ?? []).some((part) => part?.type === "toolCall")) return;
+	const children = mode.chatContainer?.children;
+	if (!Array.isArray(children)) return;
+	const index = children.indexOf(assistant);
+	if (index <= 0) return;
+	const above = children[index - 1];
+	if (!(above instanceof ToolRunSummary)) return;
+
+	absorbedReplies.add(assistant);
+	clearThoughtLabel(assistant);
+	above.setTrailingThought(assistant);
 }
 
 /** 刚结束那条消息对应的助手组件：`message_end` 时它是容器里最后一个助手组件。 */

@@ -12,7 +12,7 @@ import {
 	getMarkdownTheme,
 	initTheme,
 } from "@earendil-works/pi-coding-agent";
-import { Container, stripTerminalSequences } from "@earendil-works/pi-tui";
+import { Container, Text, stripTerminalSequences } from "@earendil-works/pi-tui";
 import extend, {
 	ToolRunGroup,
 	ToolRunSummary,
@@ -350,7 +350,7 @@ check("收起时被隐去的思考不残留 Thinking... 占位", () => {
 	assert.equal(lines.includes("Thinking..."), false, lines);
 });
 
-check("最终纯文本回复留在摘要外，保留自己的耗时标签", () => {
+check("收尾回复的耗时并入上方摘要，收起态不再多一行标签", () => {
 	const realNow = Date.now;
 	let now = 1000;
 	Date.now = () => now;
@@ -386,10 +386,190 @@ check("最终纯文本回复留在摘要外，保留自己的耗时标签", () =
 		assert.equal(summaries[0]!.children.includes(final), false, "最终回复不并入摘要");
 		assert.equal(mode.chatContainer.children.at(-1), final, "最终回复留在摘要下方");
 		const lines = plain(summaries[0]!.render(WIDTH));
-		assert.equal(lines[1]!.trimStart(), "ran 2 bash commands", "最终回复的耗时不算进上方摘要");
+		assert.equal(lines[1]!.trimStart(), "Thought for 1s, ran 2 bash commands");
 		const reply = plain(final.render(WIDTH)).join("\n");
 		assert.ok(reply.includes("已经修好了。"), reply);
+		assert.equal(reply.includes("Thought for"), false, "耗时只在摘要行上，收起态只剩正文");
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+check("上方没有摘要时，收尾回复保留自己的耗时标签", () => {
+	const realNow = Date.now;
+	let now = 1000;
+	Date.now = () => now;
+	try {
+		const mode = fakeMode([]);
+		const final = assistantRow({ thinking: "想一想", text: "就是这些。" });
+		mode.chatContainer.addChild(final);
+
+		trackThinking({ type: "message_start", message: { role: "assistant" } });
+		now = 1500;
+		trackThinking({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "想一想" }] },
+		});
+		now = 2400;
+		finishMessage(mode, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [
+					{ type: "thinking", thinking: "想一想" },
+					{ type: "text", text: "就是这些。" },
+				],
+			},
+		});
+
+		const reply = plain(final.render(WIDTH)).join("\n");
 		assert.ok(reply.includes("Thought for 1s"), reply);
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+check("回复后面紧跟提示行时，耗时照样并进上方摘要", () => {
+	const mode = fakeMode([assistantRow({}), finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 2000 });
+
+	const final = assistantRow({ thinking: "补充说明", text: "已经修好了。" });
+	mode.chatContainer.addChild(final);
+	// Pi 在 message_end 里追加的 cache miss 提示排在回复后面。
+	mode.chatContainer.addChild(new Text("Cache miss after 5m idle", 1, 0));
+	finishMessage(mode, {
+		type: "message_end",
+		message: {
+			role: "assistant",
+			stopReason: "stop",
+			content: [
+				{ type: "thinking", thinking: "补充说明" },
+				{ type: "text", text: "已经修好了。" },
+			],
+		},
+	});
+
+	assert.equal(
+		plain(summariesOf(mode)[0]!.render(WIDTH))[1]!.trimStart(),
+		"Thought for 4s, ran 2 bash commands",
+	);
+	assert.equal(plain(final.render(WIDTH)).join("\n").includes("Thought for"), false);
+});
+
+check("重扫后收尾回复的耗时仍只算一次", () => {
+	const mode = fakeMode([assistantRow({}), finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode, { thoughtMsFor: () => 2000 });
+
+	const final = assistantRow({ thinking: "补充说明", text: "已经修好了。" });
+	mode.chatContainer.addChild(final);
+	finishMessage(mode, {
+		type: "message_end",
+		message: {
+			role: "assistant",
+			stopReason: "stop",
+			content: [
+				{ type: "thinking", thinking: "补充说明" },
+				{ type: "text", text: "已经修好了。" },
+			],
+		},
+	});
+
+	const before = summariesOf(mode)[0]!;
+	assert.equal(plain(before.render(WIDTH))[1]!.trimStart(), "Thought for 4s, ran 2 bash commands");
+
+	// 重扫复用同一实例，认领的耗时只算一次。
+	groupSilentTurns(mode, { thoughtMsFor: () => 2000 });
+	const after = summariesOf(mode)[0]!;
+	assert.equal(after, before, "区间未变时复用同一实例");
+	assert.equal(plain(after.render(WIDTH))[1]!.trimStart(), "Thought for 4s, ran 2 bash commands");
+	assert.equal(plain(final.render(WIDTH)).join("\n").includes("Thought for"), false);
+});
+
+check("收尾回复的思考正文随摘要收起隐去，展开后跟随 Pi 设置", () => {
+	const realNow = Date.now;
+	let now = 1000;
+	Date.now = () => now;
+	try {
+		const mode = fakeMode([finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+		groupToolRuns(mode);
+		groupSilentTurns(mode);
+
+		const final = assistantRow({ thinking: "收尾的思考", text: "已经修好了。", hideThinkingBlock: false });
+		mode.chatContainer.addChild(final);
+		trackThinking({ type: "message_start", message: { role: "assistant" } });
+		now = 2400;
+		trackThinking({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "收尾的思考" }] },
+		});
+		finishMessage(mode, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [
+					{ type: "thinking", thinking: "收尾的思考" },
+					{ type: "text", text: "已经修好了。" },
+				],
+			},
+		});
+
+		const summary = summariesOf(mode)[0]!;
+		const rendered = () => plain(mode.chatContainer.render(WIDTH)).join("\n");
+		assert.equal(rendered().includes("收尾的思考"), false, "收起态思考正文不占行");
+		summary.setExpanded(true);
+		assert.ok(rendered().includes("收尾的思考"), "展开后显示思考正文");
+		summary.setPiThinkingHidden(true);
+		assert.equal(rendered().includes("收尾的思考"), false, "Pi 隐藏思考时展开态也不显示");
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+check("stop 但带工具调用的回复不交出耗时，标签留在自己身上", () => {
+	const realNow = Date.now;
+	let now = 1000;
+	Date.now = () => now;
+	try {
+		const mode = fakeMode([finishedBash("c1", "ls"), finishedBash("c2", "pwd")]);
+		groupToolRuns(mode);
+		groupSilentTurns(mode);
+
+		const reply = assistantRow({ thinking: "还要再查", text: "先跑一下。" });
+		mode.chatContainer.addChild(reply);
+		trackThinking({ type: "message_start", message: { role: "assistant" } });
+		now = 2400;
+		trackThinking({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "还要再查" }] },
+		});
+		// 部分 provider 归一化可能留下「stop 但带工具调用」的消息。
+		finishMessage(mode, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [
+					{ type: "thinking", thinking: "还要再查" },
+					{ type: "text", text: "先跑一下。" },
+					{ type: "toolCall", id: "c3" },
+				],
+			},
+		});
+
+		const summary = summariesOf(mode)[0]!;
+		assert.equal(
+			plain(summary.render(WIDTH))[1]!.trimStart(),
+			"ran 2 bash commands",
+			"耗时不属于上方摘要",
+		);
+		assert.ok(
+			plain(reply.render(WIDTH)).join("\n").includes("Thought for 1s"),
+			"标签留在回复自己身上",
+		);
 	} finally {
 		Date.now = realNow;
 	}
