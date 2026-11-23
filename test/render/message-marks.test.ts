@@ -73,38 +73,38 @@ function contentLines(text: string, width = 40): string[] {
 	return rawLines(text, width).filter((line) => line.trim() !== "");
 }
 
-check("普通文本首行带 `› ` 前缀", () => {
+check("普通文本首行带 `❯ ` 前缀", () => {
 	const lines = visibleLines("hello world").filter(Boolean);
-	assert.equal(lines[0], "› hello world");
+	assert.equal(lines[0], "❯ hello world");
 });
 
 check("重复安装不叠加前缀", () => {
 	const lines = visibleLines("hello world").filter(Boolean);
-	assert.equal(lines[0], "› hello world");
+	assert.equal(lines[0], "❯ hello world");
 });
 
 check("代码块首行带前缀，正文与围栏保持完整", () => {
 	const lines = visibleLines("```ts\nconst a = 1;\n```").filter(Boolean);
-	assert.equal(lines[0], "› ```ts");
+	assert.equal(lines[0], "❯ ```ts");
 	assert.ok(lines.includes("const a = 1;"), lines.join("\n"));
 	assert.equal(lines[lines.length - 1], "```");
 });
 
 check("多行消息只给首行加前缀", () => {
 	const lines = visibleLines("line1\nline2").filter(Boolean);
-	assert.deepEqual(lines, ["› line1", "line2"]);
+	assert.deepEqual(lines, ["❯ line1", "line2"]);
 });
 
 check("换行后的内容与首行内容列对齐", () => {
 	const lines = contentLines("一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十", 40);
 	assert.ok(lines.length > 1, lines.join("\n"));
-	assert.ok(lines[0]!.startsWith("› "), lines[0]);
+	assert.ok(lines[0]!.startsWith("❯ "), lines[0]);
 	for (const line of lines.slice(1)) assert.equal(contentColumn(line), 2, line);
 });
 
 check("多行消息的所有内容列对齐", () => {
 	const lines = contentLines("line1\nline2\nline3");
-	assert.equal(lines[0]!.trim(), "› line1");
+	assert.equal(lines[0]!.trim(), "❯ line1");
 	assert.deepEqual(
 		lines.slice(1).map((line) => contentColumn(line)),
 		[2, 2],
@@ -114,7 +114,7 @@ check("多行消息的所有内容列对齐", () => {
 check("代码块整体右移，围栏与正文的相对缩进不变", () => {
 	const lines = contentLines("```ts\nconst a = 1;\n```");
 	const codeIndent = visibleWidth(getMarkdownTheme().codeBlockIndent ?? "  ");
-	assert.equal(lines[0]!.trim(), "› ```ts");
+	assert.equal(lines[0]!.trim(), "❯ ```ts");
 	assert.equal(contentColumn(lines[1]!), 2 + codeIndent);
 	assert.equal(contentColumn(lines[2]!), 2);
 });
@@ -127,7 +127,7 @@ check("缩进后每行宽度不超过目标宽度", () => {
 
 check("原有引用块与列表结构不变", () => {
 	const lines = visibleLines("> quote\n\n- item").filter(Boolean);
-	assert.deepEqual(lines, ["› │ quote", "- item"]);
+	assert.deepEqual(lines, ["❯ │ quote", "- item"]);
 });
 
 check("前缀不改变渲染宽度", () => {
@@ -141,13 +141,13 @@ check("前缀不改变渲染宽度", () => {
 
 check("没有可见内容时保持原样", () => {
 	const lines = ["   ", "\x1b[48;2;1;2;3m   \x1b[49m"];
-	assert.deepEqual(prefixFirstContentLine(lines, "› "), lines);
+	assert.deepEqual(prefixFirstContentLine(lines, "❯ "), lines);
 });
 
 check("行首无内边距时仍插入并回收行尾空格", () => {
 	const line = "\x1b[48;2;1;2;3mhello   \x1b[49m";
-	const [prefixed] = prefixFirstContentLine([line], "› ");
-	assert.equal(stripTerminalSequences(prefixed).trim(), "› hello");
+	const [prefixed] = prefixFirstContentLine([line], "❯ ");
+	assert.equal(stripTerminalSequences(prefixed).trim(), "❯ hello");
 	assert.equal(visibleWidth(prefixed), visibleWidth(line));
 });
 
@@ -162,7 +162,7 @@ check("用户消息不再铺背景色", () => {
 check("去掉背景色后行宽与内容不变", () => {
 	for (const line of rawLines("hello world", 40)) assert.equal(visibleWidth(line), 40, JSON.stringify(line));
 	const lines = visibleLines("```ts\nconst a = 1;\n```").filter(Boolean);
-	assert.equal(lines[0], "› ```ts");
+	assert.equal(lines[0], "❯ ```ts");
 	assert.ok(lines.includes("const a = 1;"), lines.join("\n"));
 });
 
@@ -464,7 +464,7 @@ function assertGutterAligned(lines: readonly string[], width = WIDTH): void {
 	}
 	const joined = plain(lines).join("\n");
 	assert.equal(joined.includes("●"), false, joined);
-	assert.equal(joined.includes("›"), false, joined);
+	assert.equal(joined.includes("❯"), false, joined);
 }
 
 function bashComponent(outputPad = 1): BashExecutionComponent {
@@ -707,14 +707,14 @@ function renderEditorText(text: string, width = 40, paddingX = 0, focused = true
 	return editor.render(width).map(stripTerminalSequences);
 }
 
-check("空输入框首行以 `› ` 起头", () => {
+check("空输入框首行以 `❯ ` 起头", () => {
 	const lines = renderEditorText("");
-	assert.ok(lines[1]!.startsWith("› "), JSON.stringify(lines[1]));
+	assert.ok(lines[1]!.startsWith("❯ "), JSON.stringify(lines[1]));
 });
 
-check("首行文本紧跟 `› `", () => {
+check("首行文本紧跟 `❯ `", () => {
 	const lines = renderEditorText("hello");
-	assert.ok(lines[1]!.startsWith("› hello"), JSON.stringify(lines[1]));
+	assert.ok(lines[1]!.startsWith("❯ hello"), JSON.stringify(lines[1]));
 });
 
 check("多行输入后续行缩进到文本列", () => {
@@ -736,21 +736,21 @@ check("输入框渲染行宽度保持不变", () => {
 	}
 });
 
-check("setPaddingX 保留 `› ` 留白，getPaddingX 还原设置值", () => {
+check("setPaddingX 保留 `❯ ` 留白，getPaddingX 还原设置值", () => {
 	const editor = new PromptPrefixEditor(editorTui, editorTheme, editorKeybindings);
 	for (const padding of [0, 1, 3]) {
 		editor.setPaddingX(padding);
 		assert.equal(editor.getPaddingX(), padding);
 		editor.setText("line1\nline2");
 		const lines = editor.render(40).map(stripTerminalSequences);
-		assert.ok(lines[1]!.startsWith("›"), `${padding}: ${JSON.stringify(lines[1])}`);
+		assert.ok(lines[1]!.startsWith("❯"), `${padding}: ${JSON.stringify(lines[1])}`);
 		assert.equal(contentColumn(lines[2]!), 2 + padding, `${padding}: ${JSON.stringify(lines[2])}`);
 	}
 });
 
 check("窄终端下不插入输入框前缀且宽度不变", () => {
 	const lines = renderEditorText("hello", 4);
-	assert.ok(!lines[1]!.includes("›"), JSON.stringify(lines[1]));
+	assert.ok(!lines[1]!.includes("❯"), JSON.stringify(lines[1]));
 	for (const line of lines) assert.equal(visibleWidth(line), 4);
 });
 

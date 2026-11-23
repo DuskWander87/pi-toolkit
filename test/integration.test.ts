@@ -148,7 +148,7 @@ check("三扩展同时安装时用户、摘要与工具行左缘一致", () => {
 	for (const line of collapsed) {
 		if (line.trim() === "") continue;
 		assert.ok(
-			line.startsWith("› ") || line.startsWith("  "),
+			line.startsWith("❯ ") || line.startsWith("  "),
 			JSON.stringify(line),
 		);
 	}
@@ -159,14 +159,14 @@ check("三扩展同时安装时用户、摘要与工具行左缘一致", () => {
 	for (const line of expanded) {
 		if (line.trim() === "") continue;
 		assert.ok(
-			line.startsWith("› ") || line.startsWith("● ") || line.startsWith("  "),
+			line.startsWith("❯ ") || line.startsWith("● ") || line.startsWith("  "),
 			JSON.stringify(line),
 		);
 	}
 	// 两个工具行各一个圆点，用户消息一个前缀，不重复。
 	const joined = expanded.join("\n");
 	assert.equal((joined.match(/●/g) ?? []).length, 2, joined);
-	assert.equal((joined.match(/›/g) ?? []).length, 1, joined);
+	assert.equal((joined.match(/❯/g) ?? []).length, 1, joined);
 });
 
 check("静默轮次的思考正文只在展开后出现", () => {

@@ -2,12 +2,12 @@
  * message-marks
  *
  * Claude Code 式左侧标记栏（2 列）：
- * - 用户消息首行前加 `› `，其余行缩进对齐，便于区分用户输入与模型输出
+ * - 用户消息首行前加 `❯ `，其余行缩进对齐，便于区分用户输入与模型输出
  * - 助手消息首个文本块首行前加 `● `，其余行（含思考块）对齐到第 2 列
  * - 工具调用首行前加 `● `（进行中与成功蓝、失败红），整块对齐到第 2 列
  * - 技能调用与工具行同一套标记栏：去掉背景色，首行前加 `● `（蓝）
  * - 块与块之间统一留 1 行空行，不叠加 Pi 的 `Spacer(1)` 与组件自身的首尾留白
- * - 输入框首行以 `› ` 起头，多行输入在等宽空白后对齐
+ * - 输入框首行以 `❯ ` 起头，多行输入在等宽空白后对齐
  *
  * Pi 未暴露普通消息的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
  * 这里接管导出的组件 `render`：在渲染完成后插入标记，
@@ -42,7 +42,7 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 
-const PREFIX = "› ";
+const PREFIX = "❯ ";
 /** 助手与工具行首的圆点。 */
 const MARKER = "●";
 /** 标记栏宽度：圆点占第 1 列，第 2 列为空格。 */
@@ -344,7 +344,7 @@ export function installUserMessagePrefix(component: typeof UserMessageComponent 
 	};
 }
 
-/** 助手文本块的圆点，与 `›` 同色。 */
+/** 助手文本块的圆点，与 `❯` 同色。 */
 function assistantMarker(): string {
 	return getSelectListTheme().description(MARKER);
 }
@@ -509,7 +509,7 @@ export function installMessageMarks(): void {
 }
 
 /**
- * 首行以 `› ` 起头的输入框。
+ * 首行以 `❯ ` 起头的输入框。
  *
  * 前缀占用左侧内边距而不是叠加在文本上：换行宽度、鼠标定位、光标位置都按
  * 加宽后的内边距计算，文本在所有行上从同一列开始。
@@ -519,7 +519,7 @@ export class PromptPrefixEditor extends CustomEditor {
 		super(tui, theme, keybindings, { ...options, embedWorkingStatus: true });
 	}
 
-	/** 对外仍是调用方设置的宽度；内部保留 `› ` 的左侧留白。 */
+	/** 对外仍是调用方设置的宽度；内部保留 `❯ ` 的左侧留白。 */
 	getPaddingX(): number {
 		return Math.max(0, super.getPaddingX() - GUTTER);
 	}
