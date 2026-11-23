@@ -215,7 +215,7 @@ check("正文与摘要行按发生顺序排列，正文之前的思考由摘要�
 	const summaryY = lines.findIndex((line) => line.includes("Thought for 3s, ran 2 bash commands"));
 	assert.ok(collapsed.includes("先看看当前的失败用例。"), collapsed);
 	assert.ok(summaryY > 0, collapsed);
-	// 正文之前的思考已计入摘要行，不再展开；收尾回复在摘要之外，按 Pi 的设置显示。
+	// 正文之前的思考已计入摘要行，不再展开；收尾回复只走分组、留在摘要之外，思考按 Pi 的设置显示。
 	assert.equal(collapsed.includes("先确认现状"), false, collapsed);
 	assert.ok(collapsed.includes("收尾思考"), collapsed);
 	assert.ok(

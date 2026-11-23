@@ -1359,7 +1359,7 @@ check("正文之后的调用另起一行摘要，耗时按段累加", () => {
 	// 第一段摘要累加区间前那条回复与区间内静默轮次的耗时。
 	assert.equal(plain(summary.render(WIDTH))[1]!.trimStart(), "Thought for 3s, ran 2 bash commands");
 	assert.equal(plain(first.render(WIDTH)).join("\n").includes("Thought for"), false, "耗时已在摘要行");
-	// 收尾回复不再被吸收，保留自己的耗时标签。
+	// 收尾回复的耗时由 `finishMessage` 交给上方摘要；这里直接重扫，标签留在自己身上。
 	assert.ok(plain(second.render(WIDTH)).join("\n").includes("Thought for 1s"));
 });
 
