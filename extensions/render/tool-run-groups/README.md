@@ -119,14 +119,14 @@ pi remove ./pi-toolkit/extensions/render/tool-run-groups    # 卸载
 
 ### 依赖
 
-- `InteractiveMode` 私有成员：`handleEvent`、`renderSessionItems`、`chatContainer`、`toolOutputExpanded` 都不是公开 API。内部方法缺失时安装失败，并在 `session_start` 时提示
+- `InteractiveMode` 私有成员：`handleEvent`、`renderSessionItems`、`updateThinkingBlockVisibility`、`setHiddenThinkingLabel`、`chatContainer`、`toolOutputExpanded` 都不是公开 API。内部方法缺失时安装失败，并在 `session_start` 时提示
 - 静默轮次判定依赖助手组件内部字段：`markdownSlots` 与 `lastMessage.stopReason`；结构变化时退化到不合并，不会错误地藏起内容
 
 ### 已知问题
 
 - **执行期间会多出正在跑的工具行**：正在跑的工具行不进摘要，执行中看到的是「一行摘要 + 一行正在跑的工具行」，工具跑完才收敛成一行摘要
 - **收尾回复的秒数随回复到达才更新**：收尾回复的耗时并入上方摘要行，那一行的秒数在回复结束时变大；摘要行本身描述的是同一段请求的思考总量
-- **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，只存在内存里；任何按 session entry 重建视图的路径（`-r` / `-c`、`/tree` 跳分支、`/reload`、切换 cache miss 提示）都会换了一批新组件，摘要行与隐藏标签不带 `Thought for Ns`，收起态也就看不到那一轮思考过的痕迹。Pi 不持久化思考耗时（`AssistantMessage` 里没有耗时字段）
+- **历史回放没有逐轮思考耗时**：耗时在 `message_end` 时采集，只存在内存里；任何按 session entry 重建视图的路径（`-r` / `-c`、`/tree` 跳分支、`/reload`、切换 cache miss 提示）都会换了一批新组件，摘要行与隐藏标签不带 `Thought for Ns`，收起态也就看不到那一轮思考过的痕迹。Pi 不持久化思考耗时（`AssistantMessage` 里没有耗时字段）；重建后带的流式占位 `Thinking...` 一并收掉，不留在记录里，因此回放的那一轮也点不开思考正文，要看只能切全局的思考显示
 - **思考可见性同步只覆盖摘要与工具组**：收起时由摘要行管理思考正文（含区间前那条回复与区间之后那条收尾回复），展开时按 Pi 的设置显示；摘要之外的回复与其他容器沿用 Pi 原本的处理
 
 ### 非目标
@@ -138,14 +138,15 @@ pi remove ./pi-toolkit/extensions/render/tool-run-groups    # 卸载
 接管 `InteractiveMode` 的私有方法，不注册任何新的渲染器：
 
 - `handleEvent`：在 `message_end` 之后记录思考耗时、替换隐藏思考标签，并聚合当前工具行；正常结束且没有工具调用的收尾回复把耗时交给上方那行摘要；在 `tool_execution_end` 之后重新扫描一次，把刚跑完的工具收进摘要
-- `renderSessionItems`：历史回放结束后同样聚合
+- `renderSessionItems`：历史回放结束后同样聚合，并收掉重建组件自带的 `Thinking...` 占位标签
 - `updateThinkingBlockVisibility`：先交给 Pi 处理顶层消息，再把可见性同步到摘要与工具组内部；收起态一律隐去思考正文，展开态跟随 Pi 的设置
+- `setHiddenThinkingLabel`：交给 Pi 写完全局标签后再清一遍回放消息的占位——`/reload` 在 `session_start` 之前就重建完 chat，随后 `minimal-tools` 会再设一次标签，不清就把占位写了回去
 
 聚合只是把 Pi 自己创建并持续更新的 `ToolExecutionComponent` 移入容器组件，工具执行、结果回填与会话数据都不受影响。重复聚合不会叠加；区间未变化时复用原实例，保留用户的折叠状态。
 
 ## 测试
 
-`test/render/tool-run-groups.test.ts` 覆盖单轮与区间聚合、静默轮次判定与各类边界（文本回复、报错、中断、用户消息）。摘要文案、失败标红与思考耗时单独覆盖，包括收尾回复的耗时并入上方摘要、上方没有摘要时保留标签、重扫后只算一次、思考正文随摘要收起、带工具调用的回复保留自己的标签。执行中的聚合覆盖并行调用先结束的情况，摘要按发起顺序汇总。展开状态传递、点击行为与实例复用各有用例。运行方式见[根 README](../../../README.md#测试)。
+`test/render/tool-run-groups.test.ts` 覆盖单轮与区间聚合、静默轮次判定与各类边界（文本回复、报错、中断、用户消息）。摘要文案、失败标红与思考耗时单独覆盖，包括收尾回复的耗时并入上方摘要、上方没有摘要时保留标签、重扫后只算一次、思考正文随摘要收起、带工具调用的回复保留自己的标签、回放收掉占位标签且不动已记录的耗时、Pi 再次设置全局标签时不复活、流式中的占位照旧。执行中的聚合覆盖并行调用先结束的情况，摘要按发起顺序汇总。展开状态传递、点击行为与实例复用各有用例。运行方式见[根 README](../../../README.md#测试)。
 
 ---
 

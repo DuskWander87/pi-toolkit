@@ -17,6 +17,7 @@ import extend, {
 	ToolRunGroup,
 	ToolRunSummary,
 	applyThoughtLabel,
+	clearReplayedThoughtLabels,
 	describeRun,
 	finishMessage,
 	groupSilentTurns,
@@ -348,6 +349,89 @@ check("收起时被隐去的思考不残留 Thinking... 占位", () => {
 	groupSilentTurns(mode);
 	const lines = plain(summariesOf(mode)[0]!.render(WIDTH)).join("\n");
 	assert.equal(lines.includes("Thinking..."), false, lines);
+});
+
+check("历史回放收掉隐藏思考的占位标签", () => {
+	const mode = fakeMode([
+		assistantRow({ thinking: "先看看目录" }),
+		finishedBash("c1", "ls"),
+		finishedBash("c2", "pwd"),
+		assistantRow({ thinking: "汇总一下", text: "审查完成，结论如下。" }),
+	]);
+	groupToolRuns(mode);
+	groupSilentTurns(mode);
+	// 回放没有事件：耗时没落盘，摘要行也拿不到，标签停在 Pi 的占位。
+	clearReplayedThoughtLabels(mode.chatContainer);
+
+	const lines = plain(mode.chatContainer.render(WIDTH)).map((line) => line.trim());
+	assert.ok(lines.includes("ran 2 bash commands"), JSON.stringify(lines));
+	assert.ok(lines.includes("审查完成，结论如下。"), JSON.stringify(lines));
+	assert.equal(lines.includes("Thinking..."), false, JSON.stringify(lines));
+});
+
+check("回放清理不动已记录耗时的标签", () => {
+	const realNow = Date.now;
+	let now = 1000;
+	Date.now = () => now;
+	try {
+		const reply = assistantRow({ thinking: "想一想", text: "结论如下。" });
+		const mode = fakeMode([reply]);
+		trackThinking({ type: "message_start", message: { role: "assistant" } });
+		now = 2400;
+		trackThinking({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "thinking", thinking: "想一想" }] },
+		});
+		finishMessage(mode, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				stopReason: "stop",
+				content: [{ type: "thinking", thinking: "想一想" }, { type: "text", text: "结论如下。" }],
+			},
+		});
+
+		clearReplayedThoughtLabels(mode.chatContainer);
+		const rendered = plain(reply.render(WIDTH)).join("\n");
+		assert.ok(rendered.includes("Thought for 1s"), rendered);
+	} finally {
+		Date.now = realNow;
+	}
+});
+
+check("回放清理后 Pi 再设一次全局标签，占位不复活", () => {
+	assert.equal(installToolRunGroups(), true);
+	const reply = assistantRow({ thinking: "想一想", text: "结论如下。" });
+	const chat = new Container();
+	chat.addChild(reply);
+	const mode = { chatContainer: chat, hideThinkingBlock: true, ui: { requestRender() {} } };
+	clearReplayedThoughtLabels(chat);
+
+	// `/reload` 后 minimal-tools 在 session_start 再设一次标签，Pi 写回每个顶层消息。
+	const setLabel = (
+		InteractiveMode.prototype as unknown as {
+			setHiddenThinkingLabel: (this: typeof mode, label?: string) => void;
+		}
+	).setHiddenThinkingLabel;
+	setLabel.call(mode, "\x1b[0mThinking...");
+
+	const rendered = plain(reply.render(WIDTH)).join("\n");
+	assert.equal(rendered.includes("Thinking..."), false, rendered);
+	assert.ok(rendered.includes("结论如下。"), rendered);
+});
+
+check("流式中的占位标签不被清掉", () => {
+	const streaming = new AssistantMessageComponent(undefined, true, getMarkdownTheme(), "Thinking...", 1, []);
+	streaming.updateContent(
+		{ content: [{ type: "thinking", thinking: "正在想" }], stopReason: undefined } as never,
+		true,
+	);
+	const chat = new Container();
+	chat.addChild(streaming);
+	clearReplayedThoughtLabels(chat);
+
+	const rendered = plain(streaming.render(WIDTH)).join("\n");
+	assert.ok(rendered.includes("Thinking..."), rendered);
 });
 
 check("收尾回复的耗时并入上方摘要，收起态不再多一行标签", () => {

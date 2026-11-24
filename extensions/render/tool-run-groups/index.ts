@@ -23,7 +23,7 @@
  * 思考结束后，隐藏思考的标签从流式占位 `Thinking...` 换成 `Thought for Ns`。
  *
  * Pi 没有消息级的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
- * 因此这里接管 `InteractiveMode` 的两个私有方法：`message_end` 之后，以及历史
+ * 因此这里接管 `InteractiveMode` 的私有方法：`message_end` 之后，以及历史
  * 回放结束后，把相邻的工具行移入折叠组件。工具执行、结果回填与会话数据都不受
  * 影响——被移入组件的仍是 Pi 自己创建并持续更新的 `ToolExecutionComponent`。
  */
@@ -49,6 +49,7 @@ type MouseDispatchResult = NonNullable<ReturnType<Container["handleMouse"]>>;
 const ORIGINAL_HANDLE_EVENT = Symbol.for("pi-toolkit.tool-run-groups.handle-event");
 const ORIGINAL_RENDER_SESSION_ITEMS = Symbol.for("pi-toolkit.tool-run-groups.render-session-items");
 const ORIGINAL_UPDATE_THINKING = Symbol.for("pi-toolkit.tool-run-groups.update-thinking-visibility");
+const ORIGINAL_SET_THINKING_LABEL = Symbol.for("pi-toolkit.tool-run-groups.set-thinking-label");
 /** 摘要行缩进量，与 message-marks 的标记栏同宽，使正文从同一列开始。 */
 const GUTTER = 2;
 /** 改动类工具必须逐条可见。 */
@@ -71,6 +72,7 @@ interface ToolRow extends Component {
 interface AssistantInternals extends Component {
 	markdownSlots?: Array<{ kind: string }>;
 	lastMessage?: { stopReason?: string };
+	isStreaming?: boolean;
 	hiddenThinkingLabel?: string;
 	hideThinkingBlock?: boolean;
 	setHiddenThinkingLabel?(label: string): void;
@@ -86,6 +88,7 @@ interface GroupableMode {
 	renderSessionItems?: (...args: unknown[]) => unknown;
 	/** Pi 1.6.0 的该方法不接收参数，开关状态在 `hideThinkingBlock` 上。 */
 	updateThinkingBlockVisibility?: () => void;
+	setHiddenThinkingLabel?: (label?: string) => void;
 	hideThinkingBlock?: boolean;
 }
 
@@ -178,6 +181,25 @@ function clearAbsorbedThoughtLabels(items: readonly Component[]): void {
 	for (const item of items) {
 		if (item instanceof AssistantMessageComponent) clearThoughtLabel(item);
 	}
+}
+
+/**
+ * 历史回放重建助手组件时，隐藏思考带的还是 Pi 的流式占位 `Thinking...`。
+ *
+ * 耗时只在事件里记录，回放拿不到，摘要行无从显示；不清理的话每条隐藏思考的
+ * 消息都会留一行像仍在流式的占位。已记录耗时的组件不动，它们的标签是真的；
+ * 正在流式的那条也不动，它本来就该显示占位。
+ */
+export function clearReplayedThoughtLabels(root: Component): void {
+	if (root instanceof AssistantMessageComponent) {
+		const internals = root as unknown as AssistantInternals;
+		if (internals.isStreaming === true) return;
+		if (!thoughtByMessage.has(root)) clearThoughtLabel(root);
+		return;
+	}
+	const children = (root as { children?: unknown }).children;
+	if (!Array.isArray(children)) return;
+	for (const child of children) clearReplayedThoughtLabels(child as Component);
 }
 
 /**
@@ -850,8 +872,22 @@ export function installToolRunGroups(): boolean {
 	prototype.renderSessionItems = function (this: GroupableMode, ...args: unknown[]) {
 		const result = renderSessionItems.apply(this, args);
 		refreshToolRuns(this);
+		// 回放没有事件，耗时无从得知：收掉占位标签，只留摘要行。
+		if (this.chatContainer) clearReplayedThoughtLabels(this.chatContainer);
 		return result;
 	};
+
+	// `/reload` 在 session_start 之前就重建完 chat，随后 `minimal-tools` 之类的扩展
+	// 会再设一次全局标签，Pi 把它写回每个顶层助手消息，回放的占位又长回来。
+	// 原方法跑完再清一遍；流式中的那条由 `isStreaming` 保护。
+	const setThinkingLabel = (prototype[ORIGINAL_SET_THINKING_LABEL] ??= prototype
+		.setHiddenThinkingLabel) as GroupableMode["setHiddenThinkingLabel"];
+	if (typeof setThinkingLabel === "function") {
+		prototype.setHiddenThinkingLabel = function (this: GroupableMode, label?: string) {
+			setThinkingLabel.call(this, label);
+			if (this.chatContainer) clearReplayedThoughtLabels(this.chatContainer);
+		};
+	}
 
 	// 折叠内的消息收不到 Pi 的顶层遍历，这里补一次；方法缺失时保持原行为。
 	const updateThinkingVisibility = (prototype[ORIGINAL_UPDATE_THINKING] ??= prototype
