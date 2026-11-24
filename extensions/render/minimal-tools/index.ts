@@ -44,12 +44,12 @@ interface DiffPalette {
 	addedHighlight: Color;
 }
 
-/** 深色主题：深底 + 亮字。 */
+/** 深色主题：正红 / 正绿的深底，正文用主题的 `toolDiffAdded`·`toolDiffRemoved`。 */
 const DARK_DIFF_PALETTE: DiffPalette = {
-	removed: { kind: "rgb", r: 60, g: 25, b: 25 },
-	removedHighlight: { kind: "rgb", r: 120, g: 45, b: 45 },
-	added: { kind: "rgb", r: 20, g: 45, b: 60 },
-	addedHighlight: { kind: "rgb", r: 45, g: 90, b: 120 },
+	removed: { kind: "rgb", r: 61, g: 1, b: 1 },
+	removedHighlight: { kind: "rgb", r: 92, g: 1, b: 0 },
+	added: { kind: "rgb", r: 2, g: 40, b: 0 },
+	addedHighlight: { kind: "rgb", r: 4, g: 71, b: 0 },
 };
 
 /** 浅色主题：浅底 + 主题自带的深色前景。 */

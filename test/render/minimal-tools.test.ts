@@ -407,6 +407,36 @@ check("展开提示使用 keybinding 配置", () => {
 	assert.ok(out.includes("ctrl+shift+o to expand"), out);
 });
 
+check("diff 深色底色：删除行正红、新增行正绿", () => {
+	const edit = renderers("edit");
+	const paints: Array<{ fg?: string; bg?: { r: number; g: number; b: number } }> = [];
+	const recording = {
+		appearance: "dark",
+		fg: (_name: string, text: string) => text,
+		bg: (_name: string, text: string) => text,
+		bold: (text: string) => text,
+		style: (text: string, opts: { fg?: string; bg?: { r: number; g: number; b: number } }) => {
+			paints.push(opts);
+			return text;
+		},
+	};
+	text(
+		edit.renderResult(
+			{ content: [{ type: "text", text: "ok" }], details: { diff: "-1 old\n+1 new" } },
+			{ expanded: false, isPartial: false },
+			recording,
+			ctx({ args: { path: "a.ts" } }),
+		),
+	);
+	const tinted = (fg: string) => paints.filter((paint) => paint.fg === fg && paint.bg);
+	const removed = tinted("toolDiffRemoved");
+	const added = tinted("toolDiffAdded");
+	assert.ok(removed.length > 0 && added.length > 0, JSON.stringify(paints));
+	// 删除行底色红占绝对主导，新增行绿占绝对主导（含词级高亮那一档）。
+	for (const { bg } of removed) assert.ok(bg!.r > Math.max(bg!.g, bg!.b) * 10, JSON.stringify(bg));
+	for (const { bg } of added) assert.ok(bg!.g > Math.max(bg!.r, bg!.b) * 10, JSON.stringify(bg));
+});
+
 check("diff 组件同宽度重复渲染结果一致", () => {
 	const edit = renderers("edit");
 	const component = edit.renderResult(

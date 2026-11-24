@@ -70,7 +70,7 @@
 - 调用行：`edit <path>`，路径中的 home 目录缩写为 `~`
 - diff 块尾给增删统计：`+2 −1`；无改动时为 `no changes`
 - diff 默认最多 30 行，超出显示 `... (N more lines, ctrl+o to expand)`
-- 行级底色区分增删，整行铺满渲染宽度；单行删除 + 单行新增时，再叠加词级高亮标出真正变化的字符
+- 行级底色区分增删，整行铺满渲染宽度；文字颜色取主题的 `toolDiffRemoved`·`toolDiffAdded`；单行删除 + 单行新增时，再叠加词级高亮标出真正变化的字符
 - 超宽行折成多行，续行与首段内容列对齐：西文在空白处断行，中日韩字符逐字断行，一行内没有可断点时硬切
 
 ### write
@@ -128,6 +128,7 @@ pi remove ./pi-toolkit/extensions/render/minimal-tools    # 卸载
 - 截断与折行：`edit` 30 行、`write` 10 行；块内单行最多折 20 行，末行以 `…` 收尾，展开后不限
 - 词级高亮只处理「单行删除 + 单行新增」的配对：变化字符超过行内容 70% 时退化为行级底色，单行超过 300 字符时改用公共前后缀定位
 - 主题切换：思考标签颜色在 `session_start` 时取值，切换主题后需要 `/reload`；diff 底色只看明暗外观，自定义主题的配色可能与扩展不一致
+- diff 正文色取主题的 `toolDiffAdded`·`toolDiffRemoved`：底色由扩展给，两者取中性色（dusk 里同值）；代价是 `/export`·`/share` 的 HTML 里增删行只剩 `+`/`-` 区分
 
 ### 非目标
 
@@ -139,7 +140,7 @@ pi remove ./pi-toolkit/extensions/render/minimal-tools    # 卸载
 - 排版只有三个原语：`toolHeader`（工具名 + 参数）、`summaryLine`（`调用行 · 量化`）、`renderToolResult`（块 + 调用行）；每个工具只提供自己的参数摘要与量化字段
 - 收起成功时 `renderCall` 返回空，`renderResult` 用同一份标题拼出单行
 - 历史回放（`pi -c` / `-r`、`/tree`、`/reload`、压缩后重建）时渲染器拿到的 `executionStarted` 与 `argsComplete` 都是 `false`：调用行让位，标题只由结果行给出；实时流程靠 `argsComplete` 区分「参数已齐、尚未开始执行」那一帧
-- diff 配色按 `theme.appearance` 在深色 / 浅色两套 RGB 底色中切换
+- diff 配色分两层：底色由扩展按 `theme.appearance` 在深色 / 浅色两套 RGB 中切换（取值见 `DARK_DIFF_PALETTE`·`LIGHT_DIFF_PALETTE`），文字颜色取主题的 `toolDiffAdded`·`toolDiffRemoved`·`toolDiffContext`
 
 ## 测试
 
