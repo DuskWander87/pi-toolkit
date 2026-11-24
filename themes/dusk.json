@@ -32,7 +32,7 @@
     "warning": "warning",
     "muted": "inactive",
     "dim": "dimText",
-    "text": "text",
+    "text": "",
     "thinkingText": "dimText",
     "selectedBg": "userMessageBackgroundHover",
     "scrollbarThumb": "subtle",
