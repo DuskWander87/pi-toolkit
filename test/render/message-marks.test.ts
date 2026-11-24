@@ -21,8 +21,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
+	CURSOR_MARKER,
 	Spacer,
 	Text,
+	getKeybindings,
+	setKeybindings,
 	stripTerminalSequences,
 	setCapabilityOverrides,
 	visibleWidth,
@@ -758,6 +761,99 @@ check("输入框上下边框保持原样", () => {
 	const lines = renderEditorText("hello");
 	assert.equal(lines[0]!.trim(), "─".repeat(40));
 	assert.equal(lines[lines.length - 1]!.trim(), "─".repeat(40));
+});
+
+/** 渲染首行原始串（带控制码），用于检查颜色。 */
+function renderEditorRaw(text: string, paddingX = 0): string[] {
+	const editor = new PromptPrefixEditor(editorTui, editorTheme, editorKeybindings);
+	editor.setPaddingX(paddingX);
+	editor.setText(text);
+	editor.focused = true;
+	return editor.render(40);
+}
+
+/** `selectedText` 开启颜色时的前缀，用于判断某段是否被染色。 */
+const ACCENT_OPEN = getSelectListTheme().selectedText("\u0000").split("\u0000")[0]!;
+
+/** 一行里被 accent 覆盖的可见文本：染色区间必须唯一，且以恢复前景色的控制码收口。 */
+function accentSpan(line: string): string {
+	const parts = line.split(ACCENT_OPEN);
+	assert.equal(parts.length, 2, `染色区间不唯一: ${JSON.stringify(line)}`);
+	const rest = parts[1]!;
+	const close = rest.indexOf("\x1b[39m");
+	assert.ok(close > 0, `染色没有收口: ${JSON.stringify(line)}`);
+	return stripTerminalSequences(rest.slice(0, close));
+}
+
+/** 用桩键位把光标左移：`Editor` 从全局取键位，用完必须还原。 */
+function moveCursorLeft(editor: PromptPrefixEditor, times: number): void {
+	const original = getKeybindings();
+	setKeybindings({
+		matches: (_data: string, action: string) => action === "tui.editor.cursorLeft",
+	} as unknown as KeybindingsManager);
+	try {
+		for (let i = 0; i < times; i++) editor.handleInput("\x1b[D");
+	} finally {
+		setKeybindings(original);
+	}
+}
+
+check("输入框首行的命令用下拉选中行的颜色", () => {
+	for (const command of ["/copy", "/model", "/skill:check", "/think"]) {
+		const [top, first] = renderEditorRaw(command);
+		assert.ok(top !== undefined && first !== undefined);
+		assert.equal(accentSpan(first), command, `${command}: ${JSON.stringify(first)}`);
+		assert.equal(stripTerminalSequences(first).indexOf(command), 2, `${command}: ${JSON.stringify(first)}`);
+	}
+});
+
+check("只染命令本身，参数不着色", () => {
+	const [, first] = renderEditorRaw("/model claude-sonnet");
+	assert.ok(first !== undefined);
+	assert.equal(accentSpan(first), "/model", JSON.stringify(first));
+});
+
+check("命令带左留白时只染命令本身", () => {
+	const [, first] = renderEditorRaw("/skill:check", 3);
+	assert.ok(first !== undefined);
+	assert.equal(accentSpan(first), "/skill:check", JSON.stringify(first));
+	assert.equal(stripTerminalSequences(first).indexOf("/skill"), 2 + 3, JSON.stringify(first));
+});
+
+check("光标停在命令中间时命令仍整段染色", () => {
+	const editor = new PromptPrefixEditor(editorTui, editorTheme, editorKeybindings);
+	editor.setPaddingX(0);
+	editor.setText("/skill:check");
+	editor.focused = true;
+	moveCursorLeft(editor, 4);
+	const first = editor.render(40)[1]!;
+	assert.equal(accentSpan(first), "/skill:check", JSON.stringify(first));
+	assert.ok(first.includes(CURSOR_MARKER), `光标标记被切开: ${JSON.stringify(first)}`);
+	assert.equal(stripTerminalSequences(first).trimEnd(), "❯ /skill:check", JSON.stringify(first));
+});
+
+check("光标停在行首时命令仍整段染色", () => {
+	const editor = new PromptPrefixEditor(editorTui, editorTheme, editorKeybindings);
+	editor.setPaddingX(0);
+	editor.setText("/model claude-sonnet");
+	editor.focused = true;
+	moveCursorLeft(editor, 20);
+	const first = editor.render(40)[1]!;
+	assert.equal(accentSpan(first), "/model", JSON.stringify(first));
+	assert.ok(first.includes(CURSOR_MARKER), `光标标记被切开: ${JSON.stringify(first)}`);
+});
+
+check("行首不是命令的输入不着色", () => {
+	for (const text of ["hello", "a/b", "/ 空格", "1/2"]) {
+		const lines = renderEditorRaw(text);
+		for (const line of lines) assert.ok(!line.includes(ACCENT_OPEN), `${JSON.stringify(text)}: ${JSON.stringify(line)}`);
+	}
+});
+
+check("多行输入只有首行的命令着色", () => {
+	const lines = renderEditorRaw("/skill:check\nnext");
+	assert.ok(lines[1]!.includes(ACCENT_OPEN), JSON.stringify(lines[1]));
+	assert.ok(!lines[2]!.includes(ACCENT_OPEN), JSON.stringify(lines[2]));
 });
 
 check("输入框与默认一致，工作状态嵌入上边框", () => {

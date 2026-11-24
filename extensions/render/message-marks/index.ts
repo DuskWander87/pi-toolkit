@@ -7,7 +7,7 @@
  * - 工具调用首行前加 `● `（进行中与成功蓝、失败红），整块对齐到第 2 列
  * - 技能调用与工具行同一套标记栏：去掉背景色，首行前加 `● `（蓝）
  * - 块与块之间统一留 1 行空行，不叠加 Pi 的 `Spacer(1)` 与组件自身的首尾留白
- * - 输入框首行以 `❯ ` 起头，多行输入在等宽空白后对齐
+ * - 输入框首行以 `❯ ` 起头，多行输入在等宽空白后对齐，行首的斜杠命令与下拉选中行同色
  *
  * Pi 未暴露普通消息的渲染钩子（`registerMessageRenderer` 只处理 custom 消息），
  * 这里接管导出的组件 `render`：在渲染完成后插入标记，
@@ -85,8 +85,10 @@ const OSC_SEQUENCE = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
 const CSI_SEQUENCE = /^\x1b\[[0-9;:?<=>]*[ -/]*[@-~]/;
 /** 行尾控制码，调整宽度时需保留在末尾。 */
 const TRAILING_SEQUENCE = /(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -/]*[@-~])+$/;
-/** 行内所有控制码（OSC / CSI），删除空行时用来把终端标记挂到相邻行。 */
-const ANY_SEQUENCE = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -/]*[@-~]/g;
+/** 行内所有控制码（OSC / APC / CSI），删除空行时用来把终端标记挂到相邻行。 */
+const ANY_SEQUENCE = /\x1b[\][_][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;:?<=>]*[ -/]*[@-~]/g;
+/** 同一套控制码，只从 `lastIndex` 处匹配：逐段扫描原始行时用。 */
+const SEQUENCE_AT = new RegExp(ANY_SEQUENCE.source, "y");
 /** 背景色 SGR（`40`–`47`、`100`–`107`、`48;…`）与其复位 `49`。 */
 const BACKGROUND_SEQUENCE = /\x1b\[(?:4[0-7]|10[0-7]|48;[0-9;]*|49)m/g;
 
@@ -508,6 +510,57 @@ export function installMessageMarks(): void {
 	installGutter(CustomMessageComponent, GUTTER_CUSTOM);
 }
 
+/** 从 `index` 开始的控制码长度；这里不是控制码时返回 0。 */
+function sequenceAt(text: string, index: number): number {
+	SEQUENCE_AT.lastIndex = index;
+	return SEQUENCE_AT.exec(text)?.[0].length ?? 0;
+}
+
+/**
+ * 首行行首斜杠命令的原始下标区间：`/copy`、`/model`、`/skill:name`，参数不算命令本身。
+ *
+ * 行首不是命令（`hello`、`a/b`、只有斜杠）时返回 `undefined`。
+ */
+function slashCommandSpan(content: string): [number, number] | undefined {
+	const length = content.length;
+	let index = 0;
+	while (index < length) {
+		const skip = sequenceAt(content, index);
+		if (skip > 0) {
+			index += skip;
+			continue;
+		}
+		if (content[index] !== " ") break;
+		index += 1;
+	}
+	const start = index;
+	if (content[start] !== "/") return undefined;
+	index += 1;
+	while (index < length) {
+		const skip = sequenceAt(content, index);
+		if (skip > 0) {
+			index += skip;
+			continue;
+		}
+		if (/\s/.test(content[index]!)) break;
+		index += 1;
+	}
+	return index > start + 1 ? [start, index] : undefined;
+}
+
+/**
+ * 首行的斜杠命令染成下拉选中行的颜色：内置命令、模板、扩展命令与技能命令同一套规则。
+ *
+ * 按原始行逐段扫描，不先剥离控制码再换算下标：光标停在命令中间时命令被光标标记切开，
+ * 这样整段（连同其中的控制码）一起染色，不会把标记序列切成两半。
+ */
+function colorSlashCommand(content: string): string {
+	const span = slashCommandSpan(content);
+	if (!span) return content;
+	const [start, end] = span;
+	return content.slice(0, start) + getSelectListTheme().selectedText(content.slice(start, end)) + content.slice(end);
+}
+
 /**
  * 首行以 `❯ ` 起头的输入框。
  *
@@ -540,7 +593,7 @@ export class PromptPrefixEditor extends CustomEditor {
 		if (!first.startsWith(" ".repeat(GUTTER))) return source;
 		// 先复制再改：父类的返回数组可能被它自己缓存，原地写会污染下一次渲染。
 		const lines = [...source];
-		lines[1] = getSelectListTheme().description(PREFIX) + first.slice(GUTTER);
+		lines[1] = getSelectListTheme().description(PREFIX) + colorSlashCommand(first.slice(GUTTER));
 		return lines;
 	}
 }
